@@ -727,8 +727,9 @@ pub enum RankBy {
         /// example: `{"token_a": 0.5, "token_b": 1.2}`.
         value: HashMap<String, f64>,
     },
-    /// Rank by full-text search (BM25) relevance, or by combining scores with operators like `Sum`,
-    /// `Max`, and `Product`.
+    /// Rank by BM25 (Best Matching 25, a classic full-text search scoring function, which scores
+    /// documents higher when they contain more of the query's terms, especially rare ones), or by
+    /// combining scores with operators like `Sum`, `Max`, and `Product`.
     Text(Box<RankByText>),
     /// Order documents by the value of an attribute, like SQL's `ORDER BY`.
     Attribute(RankByAttribute),
@@ -806,8 +807,9 @@ impl RankBy {
         }
     }
 
-    /// Rank by full-text search (BM25) relevance, or by combining scores with operators like `Sum`,
-    /// `Max`, and `Product`.
+    /// Rank by BM25 (Best Matching 25, a classic full-text search scoring function, which scores
+    /// documents higher when they contain more of the query's terms, especially rare ones), or by
+    /// combining scores with operators like `Sum`, `Max`, and `Product`.
     pub fn text(value: impl Into<RankByText>) -> Self {
         Self::Text(Box::new(value.into()))
     }
@@ -823,14 +825,18 @@ impl RankBy {
         Self::Attributes(value.into_iter().map(Into::into).collect())
     }
 
-    /// Rank by the BM25 relevance of an attribute to a query string.
+    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of the
+    /// query's terms, especially rare ones).
     ///
     /// Shorthand for [`RankByText::bm25`].
     pub fn bm25(attr: impl Into<String>, value: impl Into<String>) -> Self {
         RankByText::bm25(attr, value).into()
     }
 
-    /// Rank by the BM25 relevance of an attribute to a list of query tokens.
+    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
+    /// classic full-text search scoring function, which scores documents higher when they contain more
+    /// of the query's terms, especially rare ones).
     ///
     /// Shorthand for [`RankByText::bm25_array`].
     pub fn bm25_array(
@@ -840,7 +846,9 @@ impl RankBy {
         RankByText::bm25_array(attr, value).into()
     }
 
-    /// Rank by the BM25 relevance of an attribute to a query string, with additional parameters.
+    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of the
+    /// query's terms, especially rare ones), with additional parameters.
     ///
     /// Shorthand for [`RankByText::bm25_with_params`].
     pub fn bm25_with_params(
@@ -851,8 +859,9 @@ impl RankBy {
         RankByText::bm25_with_params(attr, value, params).into()
     }
 
-    /// Rank by the BM25 relevance of an attribute to a list of query tokens, with additional
-    /// parameters.
+    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
+    /// classic full-text search scoring function, which scores documents higher when they contain more
+    /// of the query's terms, especially rare ones), with additional parameters.
     ///
     /// Shorthand for [`RankByText::bm25_array_with_params`].
     pub fn bm25_array_with_params(
@@ -885,7 +894,9 @@ impl RankBy {
     }
 
     /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
-    /// e.g. to combine an attribute's value with BM25 scores.
+    /// e.g. to combine an attribute's value with scores from BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of the
+    /// query's terms, especially rare ones).
     ///
     /// Shorthand for [`RankByText::saturate`].
     pub fn saturate(subquery: impl Into<RankByText>, params: impl Into<SaturateParams>) -> Self {
@@ -1024,29 +1035,36 @@ impl From<RankBy> for Value {
     }
 }
 
-/// Rank by full-text search (BM25) relevance, or by combining scores with operators like `Sum`,
-/// `Max`, and `Product`.
+/// Rank by BM25 (Best Matching 25, a classic full-text search scoring function, which scores
+/// documents higher when they contain more of the query's terms, especially rare ones), or by
+/// combining scores with operators like `Sum`, `Max`, and `Product`.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
 /// [`RankByText::bm25`].
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum RankByText {
-    /// Rank by the BM25 relevance of an attribute to a query string.
+    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a
+    /// classic full-text search scoring function, which scores documents higher when they contain
+    /// more of the query's terms, especially rare ones).
     Bm25 {
         /// The name of the attribute to rank by.
         attr: String,
         /// The string to search for.
         value: String,
     },
-    /// Rank by the BM25 relevance of an attribute to a list of query tokens.
+    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching
+    /// 25, a classic full-text search scoring function, which scores documents higher when they
+    /// contain more of the query's terms, especially rare ones).
     Bm25Array {
         /// The name of the attribute to rank by.
         attr: String,
         /// The tokens to search for.
         value: Vec<String>,
     },
-    /// Rank by the BM25 relevance of an attribute to a query string, with additional parameters.
+    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a
+    /// classic full-text search scoring function, which scores documents higher when they contain
+    /// more of the query's terms, especially rare ones), with additional parameters.
     Bm25WithParams {
         /// The name of the attribute to rank by.
         attr: String,
@@ -1055,8 +1073,9 @@ pub enum RankByText {
         /// Additional (optional) parameters for a single BM25 query clause.
         params: Bm25ClauseParams,
     },
-    /// Rank by the BM25 relevance of an attribute to a list of query tokens, with additional
-    /// parameters.
+    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching
+    /// 25, a classic full-text search scoring function, which scores documents higher when they
+    /// contain more of the query's terms, especially rare ones), with additional parameters.
     Bm25ArrayWithParams {
         /// The name of the attribute to rank by.
         attr: String,
@@ -1093,7 +1112,9 @@ pub enum RankByText {
         attr: String,
     },
     /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
-    /// e.g. to combine an attribute's value with BM25 scores.
+    /// e.g. to combine an attribute's value with scores from BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of
+    /// the query's terms, especially rare ones).
     Saturate {
         /// The subquery whose score to saturate.
         subquery: Box<RankByText>,
@@ -1121,7 +1142,9 @@ pub enum RankByText {
 
 #[allow(deprecated)]
 impl RankByText {
-    /// Rank by the BM25 relevance of an attribute to a query string.
+    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of the
+    /// query's terms, especially rare ones).
     pub fn bm25(attr: impl Into<String>, value: impl Into<String>) -> Self {
         Self::Bm25 {
             attr: attr.into(),
@@ -1129,7 +1152,9 @@ impl RankByText {
         }
     }
 
-    /// Rank by the BM25 relevance of an attribute to a list of query tokens.
+    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
+    /// classic full-text search scoring function, which scores documents higher when they contain more
+    /// of the query's terms, especially rare ones).
     pub fn bm25_array(
         attr: impl Into<String>,
         value: impl IntoIterator<Item = impl Into<String>>,
@@ -1140,7 +1165,9 @@ impl RankByText {
         }
     }
 
-    /// Rank by the BM25 relevance of an attribute to a query string, with additional parameters.
+    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of the
+    /// query's terms, especially rare ones), with additional parameters.
     pub fn bm25_with_params(
         attr: impl Into<String>,
         value: impl Into<String>,
@@ -1153,8 +1180,9 @@ impl RankByText {
         }
     }
 
-    /// Rank by the BM25 relevance of an attribute to a list of query tokens, with additional
-    /// parameters.
+    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
+    /// classic full-text search scoring function, which scores documents higher when they contain more
+    /// of the query's terms, especially rare ones), with additional parameters.
     pub fn bm25_array_with_params(
         attr: impl Into<String>,
         value: impl IntoIterator<Item = impl Into<String>>,
@@ -1196,7 +1224,9 @@ impl RankByText {
     }
 
     /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
-    /// e.g. to combine an attribute's value with BM25 scores.
+    /// e.g. to combine an attribute's value with scores from BM25 (Best Matching 25, a classic
+    /// full-text search scoring function, which scores documents higher when they contain more of the
+    /// query's terms, especially rare ones).
     pub fn saturate(subquery: impl Into<RankByText>, params: impl Into<SaturateParams>) -> Self {
         Self::Saturate {
             subquery: Box::new(subquery.into()),
@@ -4497,7 +4527,10 @@ pub struct NamespaceRecallResponse {
     pub ground_truth: Vec<NamespaceRecallResponseGroundTruth>,
 }
 
-/// The ground truth for one of the queries.
+/// One of the searches the evaluation ran: its query vector, sampled at random from the namespace's
+/// vectors unless `rank_by` is set, and the query's true nearest neighbors, found by exhaustive
+/// search. Recall compares these neighbors to the results of the approximate nearest neighbor (ANN)
+/// search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct NamespaceRecallResponseGroundTruth {
