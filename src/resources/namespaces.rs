@@ -1727,7 +1727,7 @@ impl WriteRequest {
         self
     }
 
-    /// The patch and filter specifying which documents to patch.
+    /// Sets the attributes in `patch` on every document that matches `filters`.
     pub fn patch_by_filter(mut self, patch_by_filter: impl Into<PatchByFilter>) -> Self {
         self.body.patch_by_filter = Some(patch_by_filter.into());
         self

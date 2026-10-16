@@ -2990,7 +2990,6 @@ impl<const N: usize> From<[&str; N]> for IncludeAttributes {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum QueryLimit {
-    /// Limits the total number of documents returned.
     Int(i64),
     /// Limits the documents returned by a query.
     Limit(Limit),
@@ -4272,16 +4271,14 @@ pub struct QueryPerformance {
     pub embedding_tokens: Option<i64>,
 }
 
-/// The result of a query, or of one subquery of a multi-query.
+/// The result of a query, or of one subquery of a multi-query. With `aggregate_by`, `aggregations`
+/// maps each aggregation's label to its value. With `group_by` as well, `aggregation_groups` holds
+/// one object per group instead, with its group key and the value of each aggregation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct SingleQueryResult {
-    /// One object per aggregation group, with its group key and the value of each requested
-    /// aggregation. Only present when `aggregate_by` and `group_by` are both set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregation_groups: Vec<AggregationGroup>,
-    /// The value of each requested aggregation, keyed by its label. Only present when
-    /// `aggregate_by` is set without `group_by`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub aggregations: HashMap<String, Value>,
     /// The documents that matched the query, ordered by `rank_by`. Only present when `rank_by` is
@@ -4489,7 +4486,9 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
-/// The result of a query.
+/// The result of a query. With `aggregate_by`, `aggregations` maps each aggregation's label to its
+/// value. With `group_by` as well, `aggregation_groups` holds one object per group instead, with
+/// its group key and the value of each aggregation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct QueryResult {
@@ -4497,12 +4496,8 @@ pub struct QueryResult {
     pub billing: QueryBilling,
     /// The performance information for a query.
     pub performance: QueryPerformance,
-    /// One object per aggregation group, with its group key and the value of each requested
-    /// aggregation. Only present when `aggregate_by` and `group_by` are both set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregation_groups: Vec<AggregationGroup>,
-    /// The value of each requested aggregation, keyed by its label. Only present when
-    /// `aggregate_by` is set without `group_by`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub aggregations: HashMap<String, Value>,
     /// The documents that matched the query, ordered by `rank_by`. Only present when `rank_by` is
@@ -4777,13 +4772,12 @@ impl CopyFromNamespaceConfig {
     }
 }
 
-/// The patch and filter specifying which documents to patch.
+/// Sets the attributes in `patch` on every document that matches `filters`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct PatchByFilter {
     /// Filter by attributes. Same syntax as the query endpoint.
     pub filters: Filter,
-    /// The attributes to set on every document that matches `filters`.
     pub patch: HashMap<String, Value>,
 }
 
