@@ -76,29 +76,17 @@ pub struct QueryBilling {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Id {
-    /// An integer ID.
-    Int(i64),
+    /// An unsigned 64-bit integer ID.
+    Int(u64),
     /// A string ID.
     String(String),
     /// A value not known to this version of the SDK.
     Other(Value),
 }
 
-impl From<i64> for Id {
-    fn from(value: i64) -> Self {
+impl From<u64> for Id {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for Id {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for Id {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -121,6 +109,22 @@ impl std::fmt::Display for Id {
             Self::String(value) => value.fmt(f),
             Self::Other(value) => value.fmt(f),
         }
+    }
+}
+
+impl From<Id> for Value {
+    fn from(value: Id) -> Self {
+        match value {
+            Id::Int(value) => value.into(),
+            Id::String(value) => value.into(),
+            Id::Other(value) => value,
+        }
+    }
+}
+
+impl From<&Id> for Value {
+    fn from(value: &Id) -> Self {
+        value.clone().into()
     }
 }
 
@@ -253,6 +257,12 @@ impl<'de> Deserialize<'de> for AggregateBy {
     }
 }
 
+impl From<AggregateBy> for Value {
+    fn from(value: AggregateBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// An expression that computes a value.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
@@ -280,6 +290,7 @@ pub enum Expr {
     VectorDist {
         /// The name of the vector attribute.
         attr: String,
+        /// The query vector.
         value: Vec<f32>,
     },
     /// Highlights matching fragments of a text attribute.
@@ -294,6 +305,8 @@ pub enum Expr {
         /// Additional (optional) parameters for the Highlight compute expression.
         config: HighlightConfigParams,
     },
+    /// The score of a ranking function, e.g. to return the score of one clause of a composite
+    /// `rank_by`.
     Score(Box<RankBy>),
 }
 
@@ -345,6 +358,8 @@ impl Expr {
         Self::RefNew(value.into())
     }
 
+    /// The score of a ranking function, e.g. to return the score of one clause of a composite
+    /// `rank_by`.
     pub fn score(value: impl Into<RankBy>) -> Self {
         Self::Score(Box::new(value.into()))
     }
@@ -426,6 +441,12 @@ impl<'de> Deserialize<'de> for Expr {
     }
 }
 
+impl From<Expr> for Value {
+    fn from(value: Expr) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// A reference to an attribute in a new document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -441,6 +462,12 @@ impl ExprRefNew {
         Self {
             ref_new: ref_new.into(),
         }
+    }
+}
+
+impl From<ExprRefNew> for Value {
+    fn from(value: ExprRefNew) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -634,43 +661,65 @@ impl From<String> for HighlightOffsetUnits {
     }
 }
 
+/// How to rank documents: by vector distance, full-text search relevance, or the value of an
+/// attribute.
+///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
 /// [`RankBy::ann`].
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum RankBy {
+    /// Rank by approximate nearest neighbor (ANN) search, ordering documents by the distance
+    /// between their vector and the query vector, closest first.
     Ann {
         /// The name of the attribute to rank by.
         attr: String,
+        /// The query vector.
         value: Vec<f32>,
     },
+    /// Rank by approximate nearest neighbor (ANN) search with late interaction. A document's
+    /// distance is the sum of the distances from each query vector to its closest vector in the
+    /// document's vector array.
     AnnMulti {
         /// The name of the vector array attribute to rank by.
         attr: String,
+        /// The query vectors, e.g. one per query token.
         value: Vec<Vec<f32>>,
     },
+    /// Rank by approximate nearest neighbor (ANN) search, with the query vector computed by an
+    /// expression, e.g. by embedding text with `Embed`.
     AnnExpr {
         /// The name of the embedded attribute to rank by.
         attr: String,
         /// An expression that computes a value.
         expr: Box<Expr>,
     },
+    /// Rank by exact nearest neighbor (kNN) search, ordering documents by the distance between
+    /// their vector and the query vector, closest first. Requires `filters`.
     Knn {
         /// The name of the attribute to rank by.
         attr: String,
+        /// The query vector.
         value: Vec<f32>,
     },
+    /// Rank by exact nearest neighbor (kNN) search with late interaction. A document's distance is
+    /// the sum of the distances from each query vector to its closest vector in the document's
+    /// vector array.
     KnnMulti {
         /// The name of the vector array attribute to rank by.
         attr: String,
+        /// The query vectors, e.g. one per query token.
         value: Vec<Vec<f32>>,
     },
+    /// Rank by exact nearest neighbor (kNN) search, with the query vector computed by an
+    /// expression, e.g. by embedding text with `Embed`. Requires `filters`.
     KnnExpr {
         /// The name of the embedded attribute to rank by.
         attr: String,
         /// An expression that computes a value.
         expr: Box<Expr>,
     },
+    /// Rank by the distance between a sparse vector attribute and a sparse query vector.
     SparseKnn {
         /// The name of the sparse vector attribute to rank by.
         attr: String,
@@ -678,7 +727,10 @@ pub enum RankBy {
         /// example: `{"token_a": 0.5, "token_b": 1.2}`.
         value: HashMap<String, f64>,
     },
+    /// Rank by full-text search (BM25) relevance, or by combining scores with operators like `Sum`,
+    /// `Max`, and `Product`.
     Text(Box<RankByText>),
+    /// Order documents by the value of an attribute, like SQL's `ORDER BY`.
     Attribute(RankByAttribute),
     /// Order by multiple attributes. Results are sorted by the first attribute, then by the second
     /// attribute for ties, and so on.
@@ -687,6 +739,8 @@ pub enum RankBy {
 
 #[allow(deprecated)]
 impl RankBy {
+    /// Rank by approximate nearest neighbor (ANN) search, ordering documents by the distance between
+    /// their vector and the query vector, closest first.
     pub fn ann(attr: impl Into<String>, value: impl Into<Vec<f32>>) -> Self {
         Self::Ann {
             attr: attr.into(),
@@ -694,6 +748,9 @@ impl RankBy {
         }
     }
 
+    /// Rank by approximate nearest neighbor (ANN) search with late interaction. A document's distance
+    /// is the sum of the distances from each query vector to its closest vector in the document's
+    /// vector array.
     pub fn ann_multi(attr: impl Into<String>, value: impl Into<Vec<Vec<f32>>>) -> Self {
         Self::AnnMulti {
             attr: attr.into(),
@@ -701,6 +758,8 @@ impl RankBy {
         }
     }
 
+    /// Rank by approximate nearest neighbor (ANN) search, with the query vector computed by an
+    /// expression, e.g. by embedding text with `Embed`.
     pub fn ann_expr(attr: impl Into<String>, expr: impl Into<Expr>) -> Self {
         Self::AnnExpr {
             attr: attr.into(),
@@ -708,6 +767,8 @@ impl RankBy {
         }
     }
 
+    /// Rank by exact nearest neighbor (kNN) search, ordering documents by the distance between their
+    /// vector and the query vector, closest first. Requires `filters`.
     pub fn knn(attr: impl Into<String>, value: impl Into<Vec<f32>>) -> Self {
         Self::Knn {
             attr: attr.into(),
@@ -715,6 +776,9 @@ impl RankBy {
         }
     }
 
+    /// Rank by exact nearest neighbor (kNN) search with late interaction. A document's distance is the
+    /// sum of the distances from each query vector to its closest vector in the document's vector
+    /// array.
     pub fn knn_multi(attr: impl Into<String>, value: impl Into<Vec<Vec<f32>>>) -> Self {
         Self::KnnMulti {
             attr: attr.into(),
@@ -722,6 +786,8 @@ impl RankBy {
         }
     }
 
+    /// Rank by exact nearest neighbor (kNN) search, with the query vector computed by an expression,
+    /// e.g. by embedding text with `Embed`. Requires `filters`.
     pub fn knn_expr(attr: impl Into<String>, expr: impl Into<Expr>) -> Self {
         Self::KnnExpr {
             attr: attr.into(),
@@ -729,6 +795,7 @@ impl RankBy {
         }
     }
 
+    /// Rank by the distance between a sparse vector attribute and a sparse query vector.
     pub fn sparse_knn(
         attr: impl Into<String>,
         value: impl IntoIterator<Item = (impl Into<String>, f64)>,
@@ -739,10 +806,13 @@ impl RankBy {
         }
     }
 
+    /// Rank by full-text search (BM25) relevance, or by combining scores with operators like `Sum`,
+    /// `Max`, and `Product`.
     pub fn text(value: impl Into<RankByText>) -> Self {
         Self::Text(Box::new(value.into()))
     }
 
+    /// Order documents by the value of an attribute, like SQL's `ORDER BY`.
     pub fn attribute(attr: impl Into<String>, order: impl Into<RankByAttributeOrder>) -> Self {
         Self::Attribute(RankByAttribute::new(attr, order))
     }
@@ -753,11 +823,15 @@ impl RankBy {
         Self::Attributes(value.into_iter().map(Into::into).collect())
     }
 
+    /// Rank by the BM25 relevance of an attribute to a query string.
+    ///
     /// Shorthand for [`RankByText::bm25`].
     pub fn bm25(attr: impl Into<String>, value: impl Into<String>) -> Self {
         RankByText::bm25(attr, value).into()
     }
 
+    /// Rank by the BM25 relevance of an attribute to a list of query tokens.
+    ///
     /// Shorthand for [`RankByText::bm25_array`].
     pub fn bm25_array(
         attr: impl Into<String>,
@@ -766,6 +840,8 @@ impl RankBy {
         RankByText::bm25_array(attr, value).into()
     }
 
+    /// Rank by the BM25 relevance of an attribute to a query string, with additional parameters.
+    ///
     /// Shorthand for [`RankByText::bm25_with_params`].
     pub fn bm25_with_params(
         attr: impl Into<String>,
@@ -775,6 +851,9 @@ impl RankBy {
         RankByText::bm25_with_params(attr, value, params).into()
     }
 
+    /// Rank by the BM25 relevance of an attribute to a list of query tokens, with additional
+    /// parameters.
+    ///
     /// Shorthand for [`RankByText::bm25_array_with_params`].
     pub fn bm25_array_with_params(
         attr: impl Into<String>,
@@ -784,31 +863,47 @@ impl RankBy {
         RankByText::bm25_array_with_params(attr, value, params).into()
     }
 
+    /// Sum the scores of the subqueries.
+    ///
     /// Shorthand for [`RankByText::sum`].
     pub fn sum(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> Self {
         RankByText::sum(subqueries).into()
     }
 
+    /// Use the highest score of the subqueries.
+    ///
     /// Shorthand for [`RankByText::max`].
     pub fn max(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> Self {
         RankByText::max(subqueries).into()
     }
 
+    /// Multiply a subquery's score by a non-negative weight, e.g. to boost one attribute over others.
+    ///
     /// Shorthand for [`RankByText::product`].
     pub fn product(weight: f64, subquery: impl Into<RankByText>) -> Self {
         RankByText::product(weight, subquery).into()
     }
 
+    /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
+    /// e.g. to combine an attribute's value with BM25 scores.
+    ///
     /// Shorthand for [`RankByText::saturate`].
     pub fn saturate(subquery: impl Into<RankByText>, params: impl Into<SaturateParams>) -> Self {
         RankByText::saturate(subquery, params).into()
     }
 
+    /// Map a non-negative score into `(0, 1]` with `midpoint^exponent / (x^exponent +
+    /// midpoint^exponent)`, the inverse of `Saturate`, e.g. for an attribute whose higher values make
+    /// documents less relevant.
+    ///
     /// Shorthand for [`RankByText::decay`].
     pub fn decay(subquery: impl Into<RankByText>, params: impl Into<DecayParams>) -> Self {
         RankByText::decay(subquery, params).into()
     }
 
+    /// The distance between a subquery's value and an origin, e.g. to boost recent documents by passing
+    /// the distance from now to `Decay`.
+    ///
     /// Shorthand for [`RankByText::dist`].
     pub fn dist(subquery: impl Into<RankByText>, origin: impl Into<Value>) -> Self {
         RankByText::dist(subquery, origin).into()
@@ -923,23 +1018,35 @@ impl<'de> Deserialize<'de> for RankBy {
     }
 }
 
+impl From<RankBy> for Value {
+    fn from(value: RankBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
+/// Rank by full-text search (BM25) relevance, or by combining scores with operators like `Sum`,
+/// `Max`, and `Product`.
+///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
 /// [`RankByText::bm25`].
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum RankByText {
+    /// Rank by the BM25 relevance of an attribute to a query string.
     Bm25 {
         /// The name of the attribute to rank by.
         attr: String,
         /// The string to search for.
         value: String,
     },
+    /// Rank by the BM25 relevance of an attribute to a list of query tokens.
     Bm25Array {
         /// The name of the attribute to rank by.
         attr: String,
         /// The tokens to search for.
         value: Vec<String>,
     },
+    /// Rank by the BM25 relevance of an attribute to a query string, with additional parameters.
     Bm25WithParams {
         /// The name of the attribute to rank by.
         attr: String,
@@ -948,6 +1055,8 @@ pub enum RankByText {
         /// Additional (optional) parameters for a single BM25 query clause.
         params: Bm25ClauseParams,
     },
+    /// Rank by the BM25 relevance of an attribute to a list of query tokens, with additional
+    /// parameters.
     Bm25ArrayWithParams {
         /// The name of the attribute to rank by.
         attr: String,
@@ -956,40 +1065,63 @@ pub enum RankByText {
         /// Additional (optional) parameters for a single BM25 query clause.
         params: Bm25ClauseParams,
     },
+    /// Sum the scores of the subqueries.
     Sum {
+        /// The subqueries whose scores to sum.
         subqueries: Vec<RankByText>,
     },
+    /// Use the highest score of the subqueries.
     Max {
+        /// The subqueries whose highest score to use.
         subqueries: Vec<RankByText>,
     },
+    /// Multiply a subquery's score by a non-negative weight, e.g. to boost one attribute over
+    /// others.
     Product {
         /// The weight of the attribute.
         weight: f64,
+        /// The subquery whose score to multiply.
         subquery: Box<RankByText>,
     },
+    /// Score documents that match a filter 1, and other documents 0, e.g. to boost documents that
+    /// match some criteria.
     Filter(Box<Filter>),
+    /// Use the value of a numeric attribute as the score. Attributes of signed types, like `int`
+    /// and `float`, must be wrapped in `Max` or `Saturate`, since scores can't be negative.
     Attribute {
-        /// the name of the attribute to rank by
+        /// The name of the attribute to rank by.
         attr: String,
     },
+    /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
+    /// e.g. to combine an attribute's value with BM25 scores.
     Saturate {
+        /// The subquery whose score to saturate.
         subquery: Box<RankByText>,
         /// Additional parameters for the Saturate operator.
         params: SaturateParams,
     },
+    /// Map a non-negative score into `(0, 1]` with `midpoint^exponent / (x^exponent +
+    /// midpoint^exponent)`, the inverse of `Saturate`, e.g. for an attribute whose higher values
+    /// make documents less relevant.
     Decay {
+        /// The subquery whose score to decay.
         subquery: Box<RankByText>,
         /// Additional parameters for the Decay operator.
         params: DecayParams,
     },
+    /// The distance between a subquery's value and an origin, e.g. to boost recent documents by
+    /// passing the distance from now to `Decay`.
     Dist {
+        /// The subquery whose distance from `origin` to compute, e.g. an `Attribute`.
         subquery: Box<RankByText>,
+        /// The value to compute the distance from, e.g. a timestamp.
         origin: Value,
     },
 }
 
 #[allow(deprecated)]
 impl RankByText {
+    /// Rank by the BM25 relevance of an attribute to a query string.
     pub fn bm25(attr: impl Into<String>, value: impl Into<String>) -> Self {
         Self::Bm25 {
             attr: attr.into(),
@@ -997,6 +1129,7 @@ impl RankByText {
         }
     }
 
+    /// Rank by the BM25 relevance of an attribute to a list of query tokens.
     pub fn bm25_array(
         attr: impl Into<String>,
         value: impl IntoIterator<Item = impl Into<String>>,
@@ -1007,6 +1140,7 @@ impl RankByText {
         }
     }
 
+    /// Rank by the BM25 relevance of an attribute to a query string, with additional parameters.
     pub fn bm25_with_params(
         attr: impl Into<String>,
         value: impl Into<String>,
@@ -1019,6 +1153,8 @@ impl RankByText {
         }
     }
 
+    /// Rank by the BM25 relevance of an attribute to a list of query tokens, with additional
+    /// parameters.
     pub fn bm25_array_with_params(
         attr: impl Into<String>,
         value: impl IntoIterator<Item = impl Into<String>>,
@@ -1031,18 +1167,21 @@ impl RankByText {
         }
     }
 
+    /// Sum the scores of the subqueries.
     pub fn sum(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> Self {
         Self::Sum {
             subqueries: subqueries.into_iter().map(Into::into).collect(),
         }
     }
 
+    /// Use the highest score of the subqueries.
     pub fn max(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> Self {
         Self::Max {
             subqueries: subqueries.into_iter().map(Into::into).collect(),
         }
     }
 
+    /// Multiply a subquery's score by a non-negative weight, e.g. to boost one attribute over others.
     pub fn product(weight: f64, subquery: impl Into<RankByText>) -> Self {
         Self::Product {
             weight,
@@ -1050,10 +1189,14 @@ impl RankByText {
         }
     }
 
+    /// Use the value of a numeric attribute as the score. Attributes of signed types, like `int` and
+    /// `float`, must be wrapped in `Max` or `Saturate`, since scores can't be negative.
     pub fn attribute(attr: impl Into<String>) -> Self {
         Self::Attribute { attr: attr.into() }
     }
 
+    /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
+    /// e.g. to combine an attribute's value with BM25 scores.
     pub fn saturate(subquery: impl Into<RankByText>, params: impl Into<SaturateParams>) -> Self {
         Self::Saturate {
             subquery: Box::new(subquery.into()),
@@ -1061,6 +1204,9 @@ impl RankByText {
         }
     }
 
+    /// Map a non-negative score into `(0, 1]` with `midpoint^exponent / (x^exponent +
+    /// midpoint^exponent)`, the inverse of `Saturate`, e.g. for an attribute whose higher values make
+    /// documents less relevant.
     pub fn decay(subquery: impl Into<RankByText>, params: impl Into<DecayParams>) -> Self {
         Self::Decay {
             subquery: Box::new(subquery.into()),
@@ -1068,6 +1214,8 @@ impl RankByText {
         }
     }
 
+    /// The distance between a subquery's value and an origin, e.g. to boost recent documents by passing
+    /// the distance from now to `Decay`.
     pub fn dist(subquery: impl Into<RankByText>, origin: impl Into<Value>) -> Self {
         Self::Dist {
             subquery: Box::new(subquery.into()),
@@ -1075,6 +1223,8 @@ impl RankByText {
         }
     }
 
+    /// Score documents that match a filter 1, and other documents 0, e.g. to boost documents that match
+    /// some criteria.
     pub fn filter(value: impl Into<Filter>) -> Self {
         Self::Filter(Box::new(value.into()))
     }
@@ -1211,6 +1361,12 @@ impl<'de> Deserialize<'de> for RankByText {
         Err(serde::de::Error::custom(format!(
             "invalid RankByText: {value}"
         )))
+    }
+}
+
+impl From<RankByText> for Value {
+    fn from(value: RankByText) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -1502,13 +1658,19 @@ pub enum Filter {
         /// The tokens to search for.
         value: Vec<String>,
     },
+    /// Matches documents that don't match the filter.
     Not {
+        /// The filter to negate.
         filter: Box<Filter>,
     },
+    /// Matches documents that match all of the filters.
     And {
+        /// The filters to combine.
         filters: Vec<Filter>,
     },
+    /// Matches documents that match at least one of the filters.
     Or {
+        /// The filters to combine.
         filters: Vec<Filter>,
     },
 }
@@ -1839,18 +2001,21 @@ impl Filter {
         }
     }
 
+    /// Matches documents that don't match the filter.
     pub fn not(filter: impl Into<Filter>) -> Self {
         Self::Not {
             filter: Box::new(filter.into()),
         }
     }
 
+    /// Matches documents that match all of the filters.
     pub fn and(filters: impl IntoIterator<Item = impl Into<Filter>>) -> Self {
         Self::And {
             filters: filters.into_iter().map(Into::into).collect(),
         }
     }
 
+    /// Matches documents that match at least one of the filters.
     pub fn or(filters: impl IntoIterator<Item = impl Into<Filter>>) -> Self {
         Self::Or {
             filters: filters.into_iter().map(Into::into).collect(),
@@ -2212,6 +2377,12 @@ impl<'de> Deserialize<'de> for Filter {
     }
 }
 
+impl From<Filter> for Value {
+    fn from(value: Filter) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Additional parameters for the Fuzzy filter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -2370,12 +2541,15 @@ impl DecayParams {
     }
 }
 
+/// Order documents by the value of an attribute, like SQL's `ORDER BY`.
+///
 /// Serialized as a JSON array (tuple).
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct RankByAttribute {
     /// The name of the attribute to rank by.
     pub attr: String,
+    /// The direction to order in.
     pub order: RankByAttributeOrder,
 }
 
@@ -2417,6 +2591,12 @@ impl<'de> Deserialize<'de> for RankByAttribute {
         Err(serde::de::Error::custom(format!(
             "invalid RankByAttribute: {value}"
         )))
+    }
+}
+
+impl From<RankByAttribute> for Value {
+    fn from(value: RankByAttribute) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2671,6 +2851,12 @@ impl<'de> Deserialize<'de> for GroupBy {
     }
 }
 
+impl From<GroupBy> for Value {
+    fn from(value: GroupBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// A function that produces group keys.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
@@ -2716,6 +2902,12 @@ impl<'de> Deserialize<'de> for GroupByFunction {
         Err(serde::de::Error::custom(format!(
             "invalid GroupByFunction: {value}"
         )))
+    }
+}
+
+impl From<GroupByFunction> for Value {
+    fn from(value: GroupByFunction) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2768,6 +2960,7 @@ impl<const N: usize> From<[&str; N]> for IncludeAttributes {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum QueryLimit {
+    /// Limits the total number of documents returned.
     Int(i64),
     /// Limits the documents returned by a query.
     Limit(Limit),
@@ -2911,6 +3104,7 @@ pub struct NamespaceExplainQueryResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct NamespaceHintCacheWarmResponse {
+    /// A message describing the result of the request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -2927,6 +3121,7 @@ pub struct NamespaceMetadata {
     pub created_at: DateTime<Utc>,
     /// The encryption configuration for a namespace.
     pub encryption: Encryption,
+    /// The state of the namespace's index.
     pub index: NamespaceMetadataIndex,
     /// The schema of the namespace.
     pub schema: HashMap<String, AttributeSchemaConfig>,
@@ -2946,13 +3141,16 @@ pub struct NamespaceMetadata {
     pub sharding: Option<ShardingConfig>,
 }
 
+/// The state of the namespace's index.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status")]
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum NamespaceMetadataIndex {
+    /// Every document in the namespace is indexed.
     #[serde(rename = "up-to-date")]
     UpToDate,
+    /// Some documents are in the write-ahead log and haven't been indexed yet.
     #[serde(rename = "updating")]
     Updating(NamespaceMetadataIndexUpdating),
     /// A variant not known to this version of the SDK.
@@ -2966,6 +3164,7 @@ impl From<NamespaceMetadataIndexUpdating> for NamespaceMetadataIndex {
     }
 }
 
+/// Some documents are in the write-ahead log and haven't been indexed yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct NamespaceMetadataIndexUpdating {
@@ -3096,6 +3295,7 @@ pub type AttributeType = String;
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Ann {
+    /// Whether to create an ANN index with the default configuration.
     Bool(bool),
     /// Configuration options for ANN (Approximate Nearest Neighbor) indexing.
     Config(AnnConfig),
@@ -3237,6 +3437,7 @@ impl AttributeEmbedConfig {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum FullTextSearch {
+    /// Whether to enable full-text search with the default configuration.
     Bool(bool),
     /// Configuration options for full-text search.
     Config(FullTextSearchConfig),
@@ -3813,6 +4014,7 @@ impl Query {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiQueryLimit {
+    /// Limits the total number of reranked documents returned.
     Int(i64),
     /// Limits the total number of reranked documents returned.
     RerankLimit(RerankLimit),
@@ -3929,6 +4131,12 @@ impl<'de> Deserialize<'de> for RerankBy {
     }
 }
 
+impl From<RerankBy> for Value {
+    fn from(value: RerankBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Configuration options for RRF.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
@@ -3989,6 +4197,12 @@ impl RerankModelParams {
     }
 }
 
+impl From<RerankModelParams> for Value {
+    fn from(value: RerankModelParams) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// The result of a multi-query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -3997,6 +4211,8 @@ pub struct MultiQueryResult {
     pub billing: QueryBilling,
     /// The performance information for a query.
     pub performance: QueryPerformance,
+    /// The results of each subquery, in the same order as `queries`. With `rerank_by`, a single
+    /// result combining the subqueries' rows.
     pub results: Vec<SingleQueryResult>,
 }
 
@@ -4026,13 +4242,20 @@ pub struct QueryPerformance {
     pub embedding_tokens: Option<i64>,
 }
 
+/// The result of a query, or of one subquery of a multi-query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct SingleQueryResult {
+    /// One object per aggregation group, with its group key and the value of each requested
+    /// aggregation. Only present when `aggregate_by` and `group_by` are both set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregation_groups: Vec<AggregationGroup>,
+    /// The value of each requested aggregation, keyed by its label. Only present when
+    /// `aggregate_by` is set without `group_by`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub aggregations: HashMap<String, Value>,
+    /// The documents that matched the query, ordered by `rank_by`. Only present when `rank_by` is
+    /// set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<Row>,
 }
@@ -4146,8 +4369,10 @@ impl<const N: usize> From<[f32; N]> for Vector {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum CopyFromNamespaceOperation {
+    /// The copy is still in progress.
     #[serde(rename = "running")]
     Running(CopyFromNamespaceOperationRunning),
+    /// The copy has finished, successfully or not.
     #[serde(rename = "finished")]
     Finished(CopyFromNamespaceOperationFinished),
     /// A variant not known to this version of the SDK.
@@ -4167,6 +4392,7 @@ impl From<CopyFromNamespaceOperationFinished> for CopyFromNamespaceOperation {
     }
 }
 
+/// The copy is still in progress.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CopyFromNamespaceOperationRunning {
@@ -4178,23 +4404,27 @@ pub struct CopyFromNamespaceOperationRunning {
     pub progress: Option<String>,
 }
 
+/// The copy has finished, successfully or not.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CopyFromNamespaceOperationFinished {
     /// The time at which the operation finished.
     pub finish_time: DateTime<Utc>,
+    /// The result of the copy.
     pub result: CopyFromNamespaceOperationResult,
     /// The time at which the operation started.
     pub start_time: DateTime<Utc>,
 }
 
+/// The result of a finished copy operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum CopyFromNamespaceOperationResult {
-    /// The response to a successful write request.
+    /// The copy succeeded, with the result of its write.
     #[serde(rename = "success")]
     Success(WriteResult),
+    /// The copy failed, with its error.
     #[serde(rename = "error")]
     Error(OperationError),
 }
@@ -4211,6 +4441,7 @@ impl From<OperationError> for CopyFromNamespaceOperationResult {
     }
 }
 
+/// The error of an asynchronous operation that failed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct OperationError {
@@ -4236,10 +4467,16 @@ pub struct QueryResult {
     pub billing: QueryBilling,
     /// The performance information for a query.
     pub performance: QueryPerformance,
+    /// One object per aggregation group, with its group key and the value of each requested
+    /// aggregation. Only present when `aggregate_by` and `group_by` are both set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregation_groups: Vec<AggregationGroup>,
+    /// The value of each requested aggregation, keyed by its label. Only present when
+    /// `aggregate_by` is set without `group_by`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub aggregations: HashMap<String, Value>,
+    /// The documents that matched the query, ordered by `rank_by`. Only present when `rank_by` is
+    /// set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<Row>,
 }
@@ -4260,6 +4497,7 @@ pub struct NamespaceRecallResponse {
     pub ground_truth: Vec<NamespaceRecallResponseGroundTruth>,
 }
 
+/// The ground truth for one of the queries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct NamespaceRecallResponseGroundTruth {
@@ -4272,6 +4510,7 @@ pub struct NamespaceRecallResponseGroundTruth {
 /// The response to a successful namespace schema request.
 pub type NamespaceSchemaResponse = HashMap<String, AttributeSchemaConfig>;
 
+/// The response to a successful request to start a copy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct NamespaceStartCopyFromResponse {
@@ -4291,6 +4530,7 @@ pub struct NamespaceStartCopyFromResponse {
 pub enum NamespaceMetadataPatchPinning {
     /// An explicit `null`.
     Null,
+    /// `true` to enable pinning with the default configuration, or `false` to remove pinning.
     Bool(bool),
     /// Configuration for namespace pinning.
     PinningConfig(PinningConfig),
@@ -4398,6 +4638,7 @@ pub type NamespaceUpdateSchemaResponse = HashMap<String, AttributeSchemaConfig>;
 pub enum BranchFromNamespaceParams {
     /// The namespace to create an instant, copy-on-write clone of.
     String(String),
+    /// Configuration for branching from another namespace.
     Config(BranchFromNamespaceConfig),
 }
 
@@ -4419,6 +4660,7 @@ impl From<BranchFromNamespaceConfig> for BranchFromNamespaceParams {
     }
 }
 
+/// Configuration for branching from another namespace.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct BranchFromNamespaceConfig {
@@ -4443,6 +4685,7 @@ impl BranchFromNamespaceConfig {
 pub enum CopyFromNamespaceParams {
     /// The namespace to copy documents from.
     String(String),
+    /// Configuration for copying documents from another namespace.
     Config(CopyFromNamespaceConfig),
 }
 
@@ -4464,6 +4707,7 @@ impl From<CopyFromNamespaceConfig> for CopyFromNamespaceParams {
     }
 }
 
+/// Configuration for copying documents from another namespace.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CopyFromNamespaceConfig {
@@ -4506,6 +4750,7 @@ impl CopyFromNamespaceConfig {
 pub struct PatchByFilter {
     /// Filter by attributes. Same syntax as the query endpoint.
     pub filters: Filter,
+    /// The attributes to set on every document that matches `filters`.
     pub patch: HashMap<String, Value>,
 }
 
@@ -4599,9 +4844,9 @@ pub enum ColumnsVector {
     Vector(Vector),
 }
 
-impl From<Vec<Vector>> for ColumnsVector {
-    fn from(value: Vec<Vector>) -> Self {
-        Self::Array(value)
+impl<T: Into<Vector>> From<Vec<T>> for ColumnsVector {
+    fn from(value: Vec<T>) -> Self {
+        Self::Array(value.into_iter().map(Into::into).collect())
     }
 }
 
@@ -4611,9 +4856,9 @@ impl From<&[Vector]> for ColumnsVector {
     }
 }
 
-impl<const N: usize> From<[Vector; N]> for ColumnsVector {
-    fn from(value: [Vector; N]) -> Self {
-        Self::Array(value.into())
+impl<T: Into<Vector>, const N: usize> From<[T; N]> for ColumnsVector {
+    fn from(value: [T; N]) -> Self {
+        Self::Array(value.into_iter().map(Into::into).collect())
     }
 }
 

@@ -30,3 +30,9 @@ pub(crate) fn decode_element<T: serde::de::DeserializeOwned>(
 ) -> Option<T> {
     T::deserialize(value).ok()
 }
+
+/// Converts an expression to JSON, for its `From` conversion into `serde_json::Value`. This can't fail, since
+/// expressions only hold values that serialize to JSON, and maps with string keys.
+pub(crate) fn expression_to_json<T: serde::Serialize>(value: T) -> serde_json::Value {
+    serde_json::to_value(value).expect("expressions serialize to JSON")
+}
