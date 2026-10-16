@@ -73,7 +73,7 @@ async fn namespaces_branch_from() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
-        .and(body_json(json!({"source_namespace":"string"})))
+        .and(body_json(json!({"branch_from_namespace":{"source_namespace":"string"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":3}},"message":"string","rows_affected":3,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":3,"embedding_tokens":3},"rows_deleted":3,"rows_patched":3,"rows_remaining":true,"rows_upserted":3,"upserted_ids":[3]})))
         .mount(&server)
         .await;
@@ -95,7 +95,7 @@ async fn namespaces_copy_from() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
-        .and(body_json(json!({"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"})))
+        .and(body_json(json!({"copy_from_namespace":{"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":3}},"message":"string","rows_affected":3,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":3,"embedding_tokens":3},"rows_deleted":3,"rows_patched":3,"rows_remaining":true,"rows_upserted":3,"upserted_ids":[3]})))
         .mount(&server)
         .await;
@@ -348,7 +348,7 @@ async fn namespaces_start_copy_from() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/async"))
-        .and(body_json(json!({"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"})))
+        .and(body_json(json!({"copy_from_namespace":{"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token":"string"})))
         .mount(&server)
         .await;
