@@ -172,7 +172,7 @@ fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
 impl Record {
     /// Fills in the duration of each phase of an attempt ending at `end`.
     fn set_durations(&mut self, timings: &Timings, end: Instant) {
-        let Some(attempt_start) = timings.attempt_start else {
+        let Some(attempt_begin) = timings.attempt_begin else {
             return;
         };
         let micros = |duration: Duration| u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
@@ -180,25 +180,25 @@ impl Record {
             Some(micros(end?.saturating_duration_since(start?)))
         };
 
-        self.total_us = Some(micros(end.saturating_duration_since(attempt_start)));
-        self.serialize_us = between(timings.serialize_start, timings.serialize_end);
+        self.total_us = Some(micros(end.saturating_duration_since(attempt_begin)));
+        self.serialize_us = between(timings.serialize_begin, timings.serialize_end);
 
         // Set by transports that compress request bodies. Zero means the body wasn't compressed.
-        let compress_start = timings.extra.get("compress_start").copied();
+        let compress_begin = timings.extra.get("compress_begin").copied();
         let compress_end = timings.extra.get("compress_end").copied();
-        self.compress_us = between(compress_start, compress_end).filter(|us| *us > 0);
+        self.compress_us = between(compress_begin, compress_end).filter(|us| *us > 0);
 
         // Waiting for a free connection, until connecting a new one or sending on a reused one.
-        let pool_start = compress_end.or(timings.request_ready);
-        let connection_ready = timings.connect_start.or(timings.send_start);
-        self.pool_us = between(pool_start, connection_ready);
+        let pool_begin = compress_end.or(timings.request_ready);
+        let connection_ready = timings.connect_begin.or(timings.send_begin);
+        self.pool_us = between(pool_begin, connection_ready);
 
-        self.connect_us = between(timings.connect_start, timings.connect_end);
-        self.send_us = between(timings.send_start, timings.send_end);
+        self.connect_us = between(timings.connect_begin, timings.connect_end);
+        self.send_us = between(timings.send_begin, timings.send_end);
         // Covers the network round trip and the server.
         self.wait_us = between(timings.send_end, timings.response_headers);
         self.body_read_us = between(timings.response_headers, timings.body_end);
-        self.deserialize_us = between(timings.deserialize_start, timings.deserialize_end);
+        self.deserialize_us = between(timings.deserialize_begin, timings.deserialize_end);
     }
 }
 
@@ -615,14 +615,14 @@ mod tests {
         let mut timings = Timings::default();
         for (name, micros) in marks {
             match *name {
-                "attempt_start" => timings.attempt_start = at(*micros),
+                "attempt_begin" => timings.attempt_begin = at(*micros),
                 "request_ready" => timings.request_ready = at(*micros),
-                "connect_start" => timings.connect_start = at(*micros),
+                "connect_begin" => timings.connect_begin = at(*micros),
                 "connect_end" => timings.connect_end = at(*micros),
-                "send_start" => timings.send_start = at(*micros),
+                "send_begin" => timings.send_begin = at(*micros),
                 "send_end" => timings.send_end = at(*micros),
                 "response_headers" => timings.response_headers = at(*micros),
-                "compress_start" | "compress_end" => {
+                "compress_begin" | "compress_end" => {
                     timings.extra.insert(name, at(*micros).unwrap());
                 }
                 other => panic!("unknown mark {other}"),
@@ -634,13 +634,13 @@ mod tests {
     #[test]
     fn computes_durations() {
         let (new_connection, base) = timings(&[
-            ("attempt_start", 0),
+            ("attempt_begin", 0),
             ("request_ready", 50),
-            ("compress_start", 60),
+            ("compress_begin", 60),
             ("compress_end", 100),
-            ("connect_start", 150),
+            ("connect_begin", 150),
             ("connect_end", 400),
-            ("send_start", 410),
+            ("send_begin", 410),
             ("send_end", 500),
             ("response_headers", 900),
         ]);
@@ -666,9 +666,9 @@ mod tests {
         );
 
         let (mut reused, base) = timings(&[
-            ("attempt_start", 0),
+            ("attempt_begin", 0),
             ("request_ready", 100),
-            ("send_start", 130),
+            ("send_begin", 130),
             ("send_end", 160),
             ("response_headers", 300),
         ]);
@@ -685,7 +685,7 @@ mod tests {
         assert_eq!(record.wait_us, Some(0));
 
         // Untraced requests, e.g. through a user-supplied HTTP client.
-        let (untraced, base) = timings(&[("attempt_start", 0)]);
+        let (untraced, base) = timings(&[("attempt_begin", 0)]);
         let mut record = Record::default();
         record.set_durations(&untraced, base + Duration::from_micros(400));
         assert_eq!(
@@ -699,10 +699,10 @@ mod tests {
         // Durations are whole microseconds, and a zero compression duration means the body wasn't compressed.
         let mut timings = Timings::default();
         let base = Instant::now();
-        timings.attempt_start = Some(base);
-        timings.deserialize_start = Some(base);
+        timings.attempt_begin = Some(base);
+        timings.deserialize_begin = Some(base);
         timings.deserialize_end = Some(base + Duration::from_nanos(999));
-        timings.extra.insert("compress_start", base);
+        timings.extra.insert("compress_begin", base);
         timings.extra.insert("compress_end", base);
         let mut record = Record::default();
         record.set_durations(&timings, base + Duration::from_nanos(1_234_567));

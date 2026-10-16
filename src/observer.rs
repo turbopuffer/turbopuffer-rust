@@ -141,24 +141,24 @@ impl ErrorKind {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Timings {
     /// The attempt began. The first attempt begins when its body is serialized.
-    pub(crate) attempt_start: Option<Instant>,
+    pub(crate) attempt_begin: Option<Instant>,
     /// Encoding the request body, once before the first attempt.
-    pub(crate) serialize_start: Option<Instant>,
+    pub(crate) serialize_begin: Option<Instant>,
     pub(crate) serialize_end: Option<Instant>,
     /// The request was built and handed to the HTTP client.
     pub(crate) request_ready: Option<Instant>,
     /// Opening a new connection: DNS, TCP and TLS. Unset when an existing connection was used.
-    pub(crate) connect_start: Option<Instant>,
+    pub(crate) connect_begin: Option<Instant>,
     pub(crate) connect_end: Option<Instant>,
     /// The connection started and finished taking the request body, which is written along with the headers.
-    pub(crate) send_start: Option<Instant>,
+    pub(crate) send_begin: Option<Instant>,
     pub(crate) send_end: Option<Instant>,
     /// The response headers were received.
     pub(crate) response_headers: Option<Instant>,
     /// The response body was fully read.
     pub(crate) body_end: Option<Instant>,
     /// Parsing the response body, only on the final attempt.
-    pub(crate) deserialize_start: Option<Instant>,
+    pub(crate) deserialize_begin: Option<Instant>,
     pub(crate) deserialize_end: Option<Instant>,
     /// Whether the attempt used an existing connection, or `None` when unknown.
     pub(crate) reused: Option<bool>,
@@ -215,7 +215,7 @@ impl Observation {
             return Self(None);
         };
         let timings = Timings {
-            serialize_start: serialized.map(|(start, _)| start),
+            serialize_begin: serialized.map(|(start, _)| start),
             serialize_end: serialized.map(|(_, end)| end),
             ..Timings::default()
         };
@@ -235,17 +235,17 @@ impl Observation {
     }
 
     /// Marks the start of an attempt, before its request is built.
-    pub(crate) fn attempt_start(&mut self, attempt: u32) {
+    pub(crate) fn start_attempt(&mut self, attempt: u32) {
         let Some(active) = self.0.as_deref_mut() else {
             return;
         };
         let now = Instant::now();
         if attempt == 0 {
-            active.timings.attempt_start = Some(active.timings.serialize_start.unwrap_or(now));
+            active.timings.attempt_begin = Some(active.timings.serialize_begin.unwrap_or(now));
         } else {
             active.attempt = attempt;
             active.timings = Timings {
-                attempt_start: Some(now),
+                attempt_begin: Some(now),
                 ..Timings::default()
             };
         }
@@ -351,9 +351,9 @@ impl Observation {
         Error::from_reqwest(err)
     }
 
-    pub(crate) fn deserialize_start(&mut self) {
+    pub(crate) fn deserialize_begin(&mut self) {
         if let Some(active) = self.0.as_deref_mut() {
-            active.timings.deserialize_start = Some(Instant::now());
+            active.timings.deserialize_begin = Some(Instant::now());
         }
     }
 
@@ -366,7 +366,7 @@ impl Observation {
             // An error response, which the response describes.
             None | Some(Error::Api(_)) => None,
             // The body couldn't be parsed.
-            Some(_) if active.timings.deserialize_start.is_some() => Some(ErrorKind::Other),
+            Some(_) if active.timings.deserialize_begin.is_some() => Some(ErrorKind::Other),
             Some(_) => Some(active.error_kind.unwrap_or(ErrorKind::Other)),
         };
         active.finish(parsed, error, error_kind);
@@ -405,7 +405,7 @@ impl Active {
         let Some(mut scope) = self.scope.take() else {
             return;
         };
-        if self.timings.deserialize_start.is_some() {
+        if self.timings.deserialize_begin.is_some() {
             self.timings.deserialize_end = Some(Instant::now());
         }
         let result = RequestResult {
@@ -471,11 +471,11 @@ enum Phase {
 fn phase(timings: &Timings, traced_body: bool) -> Phase {
     if timings.send_end.is_some() {
         Phase::Read
-    } else if timings.send_start.is_some() {
+    } else if timings.send_begin.is_some() {
         Phase::Write
     } else if !traced_body {
         Phase::Unknown
-    } else if timings.connect_start.is_some() && timings.connect_end.is_none() {
+    } else if timings.connect_begin.is_some() && timings.connect_end.is_none() {
         Phase::Connect
     } else {
         // The body would have been taken once the request had a connection.
@@ -528,7 +528,7 @@ pub(crate) struct Trace(Mutex<TraceState>);
 #[derive(Debug, Default)]
 struct TraceState {
     connects: Vec<Connect>,
-    send_start: Option<Instant>,
+    send_begin: Option<Instant>,
     send_end: Option<Instant>,
     /// Set once the attempt is over, after which late marks are ignored.
     done: bool,
@@ -547,7 +547,7 @@ impl Trace {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn connect_start(&self) -> Option<usize> {
+    fn connect_begin(&self) -> Option<usize> {
         let mut state = self.state();
         if state.done {
             return None;
@@ -572,11 +572,11 @@ impl Trace {
         }
     }
 
-    fn send_start(&self) {
+    fn send_begin(&self) {
         let now = Instant::now();
         let mut state = self.state();
         if !state.done {
-            state.send_start.get_or_insert(now);
+            state.send_begin.get_or_insert(now);
         }
     }
 
@@ -593,7 +593,7 @@ impl Trace {
     fn settle(&self, timings: &mut Timings, used: Option<(SocketAddr, SocketAddr)>) {
         let mut state = self.state();
         state.done = true;
-        timings.send_start = state.send_start;
+        timings.send_begin = state.send_begin;
         timings.send_end = state.send_end;
         let connect = match used {
             Some(used) => {
@@ -608,7 +608,7 @@ impl Trace {
             None => state.connects.last(),
         };
         if let Some(connect) = connect {
-            timings.connect_start = Some(connect.start);
+            timings.connect_begin = Some(connect.start);
             timings.connect_end = connect.end;
         }
     }
@@ -644,7 +644,7 @@ impl http_body::Body for TracedBody {
         }
         if !this.started {
             this.started = true;
-            this.trace.send_start();
+            this.trace.send_begin();
         }
         let chunk = this
             .remaining
@@ -698,7 +698,7 @@ where
     fn call(&mut self, target: Target) -> Self::Future {
         // The pool starts connecting while it polls the request that needs the connection.
         let traced = ATTEMPT
-            .try_with(|trace| trace.connect_start().map(|index| (trace.clone(), index)))
+            .try_with(|trace| trace.connect_begin().map(|index| (trace.clone(), index)))
             .ok()
             .flatten();
         let connecting = self.0.call(target);
@@ -928,17 +928,17 @@ mod tests {
         );
         let t = recorder.finished();
         ordered(&[
-            t.attempt_start,
-            t.serialize_start,
+            t.attempt_begin,
+            t.serialize_begin,
             t.serialize_end,
             t.request_ready,
-            t.connect_start,
+            t.connect_begin,
             t.connect_end,
-            t.send_start,
+            t.send_begin,
             t.send_end,
             t.response_headers,
             t.body_end,
-            t.deserialize_start,
+            t.deserialize_begin,
             t.deserialize_end,
         ]);
         assert_eq!(t.reused, Some(false));
@@ -954,11 +954,11 @@ mod tests {
 
         let attempts = recorder.attempts();
         assert_eq!(attempts[0].reused, Some(false));
-        assert!(attempts[0].connect_start.is_some() && attempts[0].connect_end.is_some());
+        assert!(attempts[0].connect_begin.is_some() && attempts[0].connect_end.is_some());
         assert_eq!(attempts[1].reused, Some(true));
-        assert!(attempts[1].connect_start.is_none() && attempts[1].connect_end.is_none());
+        assert!(attempts[1].connect_begin.is_none() && attempts[1].connect_end.is_none());
         // Sending is traced through the request body, and these have none.
-        assert!(attempts[1].send_start.is_none());
+        assert!(attempts[1].send_begin.is_none());
     }
 
     #[tokio::test]
@@ -1028,8 +1028,8 @@ mod tests {
         assert_eq!(headers, ["0", "1"]);
         // Serializing happened before the first attempt.
         let attempts = recorder.attempts();
-        assert!(attempts[0].serialize_start.is_some());
-        assert!(attempts[1].serialize_start.is_none());
+        assert!(attempts[0].serialize_begin.is_some());
+        assert!(attempts[1].serialize_begin.is_none());
     }
 
     #[tokio::test]
@@ -1095,7 +1095,7 @@ mod tests {
             ]
         );
         let t = recorder.finished();
-        assert!(t.connect_start.is_some() && t.connect_end.is_none());
+        assert!(t.connect_begin.is_some() && t.connect_end.is_none());
     }
 
     #[tokio::test]
@@ -1271,11 +1271,11 @@ mod tests {
         let mut timings = Timings::default();
         assert_eq!(phase(&timings, false), Phase::Unknown);
         assert_eq!(phase(&timings, true), Phase::Pool);
-        timings.connect_start = Some(Instant::now());
+        timings.connect_begin = Some(Instant::now());
         assert_eq!(phase(&timings, true), Phase::Connect);
         timings.connect_end = Some(Instant::now());
         assert_eq!(phase(&timings, true), Phase::Pool);
-        timings.send_start = Some(Instant::now());
+        timings.send_begin = Some(Instant::now());
         assert_eq!(phase(&timings, false), Phase::Write);
         timings.send_end = Some(Instant::now());
         assert_eq!(phase(&timings, false), Phase::Read);

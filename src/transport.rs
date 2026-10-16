@@ -200,7 +200,7 @@ impl Client {
         parse: impl FnOnce(&[u8]) -> Result<T>,
     ) -> Result<T> {
         let bytes = self.send_and_read(request, observation).await?;
-        observation.deserialize_start();
+        observation.deserialize_begin();
         parse(&bytes)
     }
 
@@ -239,7 +239,7 @@ impl Client {
 
         let mut attempt = 0;
         loop {
-            observation.attempt_start(attempt);
+            observation.start_attempt(attempt);
             let result = match self
                 .request_builder(request, url.clone(), attempt, timeout)
                 .build()
