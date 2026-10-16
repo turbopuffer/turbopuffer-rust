@@ -3,7 +3,9 @@
 #![warn(missing_debug_implementations)]
 
 mod client;
+mod custom;
 mod error;
+mod observer;
 pub mod pagination;
 pub mod resources;
 mod row;

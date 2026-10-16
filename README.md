@@ -213,6 +213,22 @@ TLS is provided by [rustls](https://docs.rs/rustls) by default. To use your plat
 cargo add turbopuffer --no-default-features --features native-tls
 ```
 
+## Client telemetry
+
+The client can report its own request timings to turbopuffer to help diagnose latency between your application and the API. Telemetry is disabled by default. To enable it, set the `TURBOPUFFER_TELEMETRY` environment variable to `1`, or use `ClientBuilder::telemetry`:
+
+```rust no_run
+use turbopuffer::Client;
+
+fn configure() -> Result<Client, turbopuffer::Error> {
+    Client::builder().telemetry(true).build()
+}
+```
+
+`.telemetry(false)` disables telemetry even when the environment variable is set.
+
+When enabled, timings for completed requests are attached to subsequent requests in the `X-turbopuffer-Client-Telemetry` header, so no additional requests are made. Each record contains the request's method and path with the namespace name removed, its status code, retry count, whether it reused an existing connection, and client-side durations (serialization, waiting for a free connection, connecting, sending, waiting for the response, reading the response body, and deserialization). Connections and sending are only timed with the client's own HTTP client, not one passed to `ClientBuilder::http_client`. Request and response bodies and API keys are never included. turbopuffer may ask the client to record only a sample of requests.
+
 ## Requirements
 
 Rust 1.85 or later.

@@ -240,6 +240,7 @@ impl BranchFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
+            .overload("branchFrom")
             .json(&BTreeMap::from([("branch_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
@@ -339,6 +340,7 @@ impl CopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
+            .overload("copyFrom")
             .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
@@ -848,6 +850,7 @@ impl MultiQueryRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
+            .overload("multiQuery")
             .json(&self.body)?
             .options(self.options);
         Ok((self.client, request))
@@ -916,7 +919,9 @@ impl PollCopyFromRequest {
             encode_path_segment(&self.namespace),
             encode_path_segment(&self.token)
         );
-        let request = ApiRequest::new(Method::GET, path).options(self.options);
+        let request = ApiRequest::new(Method::GET, path)
+            .overload("pollCopyFrom")
+            .options(self.options);
         Ok((self.client, request))
     }
 
@@ -1401,6 +1406,7 @@ impl StartCopyFromRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
+            .overload("startCopyFrom")
             .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))

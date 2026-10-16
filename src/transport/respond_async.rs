@@ -22,6 +22,7 @@ use tokio::time::Instant;
 use super::{ApiRequest, decode, retry_after, should_retry};
 use crate::client::Client;
 use crate::error::{ApiError, Error, Result};
+use crate::observer::Observation;
 
 pub(super) const PREFER: &str = "prefer";
 pub(super) const RESPOND_ASYNC: &str = "respond-async";
@@ -43,13 +44,14 @@ impl Client {
         &self,
         request: &ApiRequest,
         response: Response,
+        observation: &mut Observation,
     ) -> Result<Bytes> {
         if !responded_async(&response) {
-            return response.bytes().await.map_err(Error::from_reqwest);
+            return self.read_body(response, observation).await;
         }
 
         let location = location(&response);
-        let body = response.bytes().await.map_err(Error::from_reqwest)?;
+        let body = self.read_body(response, observation).await?;
         let location = location.map_err(|message| Error::Decode {
             source: serde::de::Error::custom(message),
             body: String::from_utf8_lossy(&body).into_owned(),
