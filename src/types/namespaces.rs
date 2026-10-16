@@ -19,7 +19,7 @@ pub struct WriteResult {
     /// A message describing the result of the write request.
     pub message: String,
     /// The number of rows affected by the write request.
-    pub rows_affected: i64,
+    pub rows_affected: u64,
     /// The IDs of documents that were deleted. Only included when `return_affected_ids` is true and
     /// at least one document was deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -33,16 +33,16 @@ pub struct WriteResult {
     pub performance: Option<WritePerformance>,
     /// The number of rows deleted by the write request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rows_deleted: Option<i64>,
+    pub rows_deleted: Option<u64>,
     /// The number of rows patched by the write request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rows_patched: Option<i64>,
+    pub rows_patched: Option<u64>,
     /// Whether more documents match the filter for partial operations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows_remaining: Option<bool>,
     /// The number of rows upserted by the write request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rows_upserted: Option<i64>,
+    pub rows_upserted: Option<u64>,
     /// The IDs of documents that were upserted. Only included when `return_affected_ids` is true
     /// and at least one document was upserted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -54,7 +54,7 @@ pub struct WriteResult {
 #[non_exhaustive]
 pub struct WriteBilling {
     /// The number of billable logical bytes written to the namespace.
-    pub billable_logical_bytes_written: i64,
+    pub billable_logical_bytes_written: u64,
     /// The billing information for a query.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryBilling>,
@@ -65,9 +65,9 @@ pub struct WriteBilling {
 #[non_exhaustive]
 pub struct QueryBilling {
     /// The number of billable logical bytes queried from the namespace.
-    pub billable_logical_bytes_queried: i64,
+    pub billable_logical_bytes_queried: u64,
     /// The number of billable logical bytes returned from the query.
-    pub billable_logical_bytes_returned: i64,
+    pub billable_logical_bytes_returned: u64,
 }
 
 /// An identifier for a document.
@@ -76,29 +76,17 @@ pub struct QueryBilling {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Id {
-    /// An integer ID.
-    Int(i64),
+    /// An unsigned 64-bit integer ID.
+    Int(u64),
     /// A string ID.
     String(String),
     /// A value not known to this version of the SDK.
     Other(Value),
 }
 
-impl From<i64> for Id {
-    fn from(value: i64) -> Self {
+impl From<u64> for Id {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for Id {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for Id {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -124,18 +112,34 @@ impl std::fmt::Display for Id {
     }
 }
 
+impl From<Id> for Value {
+    fn from(value: Id) -> Self {
+        match value {
+            Id::Int(value) => value.into(),
+            Id::String(value) => value.into(),
+            Id::Other(value) => value,
+        }
+    }
+}
+
+impl From<&Id> for Value {
+    fn from(value: &Id) -> Self {
+        value.clone().into()
+    }
+}
+
 /// The performance information for a write request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct WritePerformance {
     /// Request time measured on the server, in milliseconds.
-    pub server_total_ms: i64,
+    pub server_total_ms: u64,
     /// Time spent embedding text, in milliseconds. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_ms: Option<i64>,
+    pub embedding_ms: Option<u64>,
     /// The number of tokens embedded. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_tokens: Option<i64>,
+    pub embedding_tokens: Option<u64>,
 }
 
 /// The encryption configuration for a namespace.
@@ -250,6 +254,12 @@ impl<'de> Deserialize<'de> for AggregateBy {
         Err(serde::de::Error::custom(format!(
             "invalid AggregateBy: {value}"
         )))
+    }
+}
+
+impl From<AggregateBy> for Value {
+    fn from(value: AggregateBy) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -426,6 +436,12 @@ impl<'de> Deserialize<'de> for Expr {
     }
 }
 
+impl From<Expr> for Value {
+    fn from(value: Expr) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// A reference to an attribute in a new document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -441,6 +457,12 @@ impl ExprRefNew {
         Self {
             ref_new: ref_new.into(),
         }
+    }
+}
+
+impl From<ExprRefNew> for Value {
+    fn from(value: ExprRefNew) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -475,7 +497,7 @@ pub struct HighlightConfigParams {
     pub fragment_by: Option<HighlightFragmentBy>,
     /// The maximum number of fragments to return. Defaults to `3`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fragment_limit: Option<i64>,
+    pub fragment_limit: Option<u64>,
     /// The units to report highlighted fragment offsets in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_offsets: Option<HighlightOffsetUnits>,
@@ -498,7 +520,7 @@ impl HighlightConfigParams {
     }
 
     /// The maximum number of fragments to return. Defaults to `3`.
-    pub fn fragment_limit(mut self, fragment_limit: i64) -> Self {
+    pub fn fragment_limit(mut self, fragment_limit: u64) -> Self {
         self.fragment_limit = Some(fragment_limit);
         self
     }
@@ -923,6 +945,12 @@ impl<'de> Deserialize<'de> for RankBy {
     }
 }
 
+impl From<RankBy> for Value {
+    fn from(value: RankBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
 /// [`RankByText::bm25`].
 #[derive(Debug, Clone, PartialEq)]
@@ -1211,6 +1239,12 @@ impl<'de> Deserialize<'de> for RankByText {
         Err(serde::de::Error::custom(format!(
             "invalid RankByText: {value}"
         )))
+    }
+}
+
+impl From<RankByText> for Value {
+    fn from(value: RankByText) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2212,6 +2246,12 @@ impl<'de> Deserialize<'de> for Filter {
     }
 }
 
+impl From<Filter> for Value {
+    fn from(value: Filter) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Additional parameters for the Fuzzy filter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -2251,12 +2291,12 @@ pub struct FuzzyMaxEditDistance {
     pub distance: u64,
     /// Minimum number of characters in a query where this distance applies. Must be at least 3 ·
     /// (distance + 1).
-    pub min_query_chars: i64,
+    pub min_query_chars: u64,
 }
 
 impl FuzzyMaxEditDistance {
     /// Creates a new [`FuzzyMaxEditDistance`] from its required fields.
-    pub fn new(distance: u64, min_query_chars: i64) -> Self {
+    pub fn new(distance: u64, min_query_chars: u64) -> Self {
         Self {
             distance,
             min_query_chars,
@@ -2417,6 +2457,12 @@ impl<'de> Deserialize<'de> for RankByAttribute {
         Err(serde::de::Error::custom(format!(
             "invalid RankByAttribute: {value}"
         )))
+    }
+}
+
+impl From<RankByAttribute> for Value {
+    fn from(value: RankByAttribute) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2671,6 +2717,12 @@ impl<'de> Deserialize<'de> for GroupBy {
     }
 }
 
+impl From<GroupBy> for Value {
+    fn from(value: GroupBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// A function that produces group keys.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
@@ -2716,6 +2768,12 @@ impl<'de> Deserialize<'de> for GroupByFunction {
         Err(serde::de::Error::custom(format!(
             "invalid GroupByFunction: {value}"
         )))
+    }
+}
+
+impl From<GroupByFunction> for Value {
+    fn from(value: GroupByFunction) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2768,26 +2826,14 @@ impl<const N: usize> From<[&str; N]> for IncludeAttributes {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum QueryLimit {
-    Int(i64),
+    Int(u64),
     /// Limits the documents returned by a query.
     Limit(Limit),
 }
 
-impl From<i64> for QueryLimit {
-    fn from(value: i64) -> Self {
+impl From<u64> for QueryLimit {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for QueryLimit {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for QueryLimit {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -2802,7 +2848,7 @@ impl From<Limit> for QueryLimit {
 #[non_exhaustive]
 pub struct Limit {
     /// Limits the total number of documents returned.
-    pub total: i64,
+    pub total: u64,
     /// Limits the number of documents with the same value for a set of attributes (the "limit key")
     /// that can appear in the results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2811,7 +2857,7 @@ pub struct Limit {
 
 impl Limit {
     /// Creates a new [`Limit`] from its required fields.
-    pub fn new(total: i64) -> Self {
+    pub fn new(total: u64) -> Self {
         Self {
             total,
             per: Default::default(),
@@ -2834,12 +2880,12 @@ pub struct LimitPer {
     /// The attributes to include in the limit key.
     pub attributes: Vec<String>,
     /// The maximum number of documents to return for each value of the limit key.
-    pub limit: i64,
+    pub limit: u64,
 }
 
 impl LimitPer {
     /// Creates a new [`LimitPer`] from its required fields.
-    pub fn new(attributes: impl IntoIterator<Item = impl Into<String>>, limit: i64) -> Self {
+    pub fn new(attributes: impl IntoIterator<Item = impl Into<String>>, limit: u64) -> Self {
         Self {
             attributes: attributes.into_iter().map(Into::into).collect(),
             limit,
@@ -2920,9 +2966,9 @@ pub struct NamespaceHintCacheWarmResponse {
 #[non_exhaustive]
 pub struct NamespaceMetadata {
     /// The approximate number of logical bytes in the namespace.
-    pub approx_logical_bytes: i64,
+    pub approx_logical_bytes: u64,
     /// The approximate number of rows in the namespace.
-    pub approx_row_count: i64,
+    pub approx_row_count: u64,
     /// The timestamp when the namespace was created.
     pub created_at: DateTime<Utc>,
     /// The encryption configuration for a namespace.
@@ -2971,9 +3017,9 @@ impl From<NamespaceMetadataIndexUpdating> for NamespaceMetadataIndex {
 pub struct NamespaceMetadataIndexUpdating {
     /// The number of bytes in the namespace that are in the write-ahead log but have not yet been
     /// indexed.
-    pub unindexed_bytes: i64,
+    pub unindexed_bytes: u64,
     /// The number of rows in the write-ahead log that have not yet been indexed.
-    pub unindexed_rows: i64,
+    pub unindexed_rows: u64,
 }
 
 /// Detailed configuration for an attribute attached to a document.
@@ -3200,7 +3246,7 @@ pub struct AttributeEmbedConfig {
     /// storing embeddings in an existing attribute, this can be omitted, and may not be set to a
     /// value other than the dimensions of that attribute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dims: Option<i64>,
+    pub dims: Option<u64>,
 }
 
 impl AttributeEmbedConfig {
@@ -3223,7 +3269,7 @@ impl AttributeEmbedConfig {
     /// The dimensionality to embed at. If not set, will pick the default for this model. If you're
     /// storing embeddings in an existing attribute, this can be omitted, and may not be set to a value
     /// other than the dimensions of that attribute.
-    pub fn dims(mut self, dims: i64) -> Self {
+    pub fn dims(mut self, dims: u64) -> Self {
         self.dims = Some(dims);
         self
     }
@@ -3279,7 +3325,7 @@ pub struct FullTextSearchConfig {
     /// Maximum length of a token in bytes. Tokens larger than this value during tokenization will
     /// be filtered out. Has to be between `1` and `254` (inclusive). Defaults to `39`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_token_length: Option<i64>,
+    pub max_token_length: Option<u64>,
     /// Removes common words from the text based on language. Defaults to `true` (i.e. remove common
     /// words).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3331,7 +3377,7 @@ impl FullTextSearchConfig {
 
     /// Maximum length of a token in bytes. Tokens larger than this value during tokenization will be
     /// filtered out. Has to be between `1` and `254` (inclusive). Defaults to `39`.
-    pub fn max_token_length(mut self, max_token_length: i64) -> Self {
+    pub fn max_token_length(mut self, max_token_length: u64) -> Self {
         self.max_token_length = Some(max_token_length);
         self
     }
@@ -3638,11 +3684,11 @@ pub struct PinningConfigResponse {
 #[non_exhaustive]
 pub struct PinningStatus {
     /// The number of replicas that are warm and serving traffic.
-    pub ready_replicas: i64,
+    pub ready_replicas: u64,
     /// The number of running replicas for the namespace. Replicas are billed once running, even
     /// before they finish warming their caches and become ready to serve traffic. This count is
     /// updated independently and may briefly disagree with the other status fields.
-    pub replicas: i64,
+    pub replicas: u64,
     /// The timestamp of the latest pinning status snapshot.
     pub updated_at: DateTime<Utc>,
     /// Aggregate utilization for the pinned namespace, reported as a value between 0.0 and 1.0.
@@ -3708,7 +3754,7 @@ pub struct Query {
     pub rank_by: Option<RankBy>,
     /// The number of results to return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<i64>,
+    pub top_k: Option<u64>,
 }
 
 impl Query {
@@ -3801,7 +3847,7 @@ impl Query {
     }
 
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.top_k = Some(top_k);
         self
     }
@@ -3813,26 +3859,14 @@ impl Query {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiQueryLimit {
-    Int(i64),
+    Int(u64),
     /// Limits the total number of reranked documents returned.
     RerankLimit(RerankLimit),
 }
 
-impl From<i64> for MultiQueryLimit {
-    fn from(value: i64) -> Self {
+impl From<u64> for MultiQueryLimit {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for MultiQueryLimit {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for MultiQueryLimit {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -3847,12 +3881,12 @@ impl From<RerankLimit> for MultiQueryLimit {
 #[non_exhaustive]
 pub struct RerankLimit {
     /// Limits the total number of documents returned after reranking.
-    pub total: i64,
+    pub total: u64,
 }
 
 impl RerankLimit {
     /// Creates a new [`RerankLimit`] from its required fields.
-    pub fn new(total: i64) -> Self {
+    pub fn new(total: u64) -> Self {
         Self { total }
     }
 }
@@ -3929,13 +3963,19 @@ impl<'de> Deserialize<'de> for RerankBy {
     }
 }
 
+impl From<RerankBy> for Value {
+    fn from(value: RerankBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Configuration options for RRF.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct RrfParams {
     /// RRF rank constant (`k`). Must be greater than zero. Defaults to `60`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rank_constant: Option<i64>,
+    pub rank_constant: Option<u64>,
     /// A positive weight for each subquery, in the same order as `queries`. The number of weights
     /// must match the number of subqueries. When omitted, every subquery has a weight of `1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3949,7 +3989,7 @@ impl RrfParams {
     }
 
     /// RRF rank constant (`k`). Must be greater than zero. Defaults to `60`.
-    pub fn rank_constant(mut self, rank_constant: i64) -> Self {
+    pub fn rank_constant(mut self, rank_constant: u64) -> Self {
         self.rank_constant = Some(rank_constant);
         self
     }
@@ -3989,6 +4029,12 @@ impl RerankModelParams {
     }
 }
 
+impl From<RerankModelParams> for Value {
+    fn from(value: RerankModelParams) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// The result of a multi-query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -4005,25 +4051,25 @@ pub struct MultiQueryResult {
 #[non_exhaustive]
 pub struct QueryPerformance {
     /// the approximate number of documents in the namespace.
-    pub approx_namespace_size: i64,
+    pub approx_namespace_size: u64,
     /// The ratio of cache hits to total cache lookups.
     pub cache_hit_ratio: f64,
     /// A qualitative description of the cache hit ratio (`hot`, `warm`, or `cold`).
     pub cache_temperature: String,
     /// The number of unindexed documents processed by the query.
-    pub exhaustive_search_count: i64,
+    pub exhaustive_search_count: u64,
     /// Request time measured on the server, excluding time spent waiting due to the namespace
     /// concurrency limit.
-    pub query_execution_ms: i64,
+    pub query_execution_ms: u64,
     /// Request time measured on the server, including time spent waiting for other queries to
     /// complete if the namespace was at its concurrency limit.
-    pub server_total_ms: i64,
+    pub server_total_ms: u64,
     /// Time spent embedding text, in milliseconds. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_ms: Option<i64>,
+    pub embedding_ms: Option<u64>,
     /// The number of tokens embedded. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_tokens: Option<i64>,
+    pub embedding_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -4217,7 +4263,7 @@ pub struct OperationError {
     /// The response to an unsuccessful request.
     pub detail: ErrorResponse,
     /// The HTTP status code of the operation's error.
-    pub status_code: i64,
+    pub status_code: u64,
 }
 
 /// The response to an unsuccessful request.
@@ -4599,9 +4645,9 @@ pub enum ColumnsVector {
     Vector(Vector),
 }
 
-impl From<Vec<Vector>> for ColumnsVector {
-    fn from(value: Vec<Vector>) -> Self {
-        Self::Array(value)
+impl<T: Into<Vector>> From<Vec<T>> for ColumnsVector {
+    fn from(value: Vec<T>) -> Self {
+        Self::Array(value.into_iter().map(Into::into).collect())
     }
 }
 
@@ -4611,9 +4657,9 @@ impl From<&[Vector]> for ColumnsVector {
     }
 }
 
-impl<const N: usize> From<[Vector; N]> for ColumnsVector {
-    fn from(value: [Vector; N]) -> Self {
-        Self::Array(value.into())
+impl<T: Into<Vector>, const N: usize> From<[T; N]> for ColumnsVector {
+    fn from(value: [T; N]) -> Self {
+        Self::Array(value.into_iter().map(Into::into).collect())
     }
 }
 
