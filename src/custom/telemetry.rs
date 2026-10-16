@@ -219,10 +219,11 @@ fn server_total_ms(parsed: &dyn Any) -> Option<u64> {
     None
 }
 
-/// The error reported for a request that failed without an HTTP status.
+/// The error reported for a failed request.
 fn error_name(kind: ErrorKind) -> &'static str {
     match kind {
         ErrorKind::Canceled => "canceled",
+        ErrorKind::Other => "other",
         kind if kind.is_timeout() => "timeout",
         _ => "connect",
     }
@@ -976,7 +977,7 @@ mod tests {
         let record = &take_records(&buffer)[0];
         assert_eq!(
             (&record["status"], &record["error"]),
-            (&json!(200), &json!("connect"))
+            (&json!(200), &json!("other"))
         );
     }
 
