@@ -76,29 +76,17 @@ pub struct QueryBilling {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Id {
-    /// An integer ID.
-    Int(i64),
+    /// An unsigned 64-bit integer ID.
+    Int(u64),
     /// A string ID.
     String(String),
     /// A value not known to this version of the SDK.
     Other(Value),
 }
 
-impl From<i64> for Id {
-    fn from(value: i64) -> Self {
+impl From<u64> for Id {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for Id {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for Id {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
