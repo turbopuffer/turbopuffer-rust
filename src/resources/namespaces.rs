@@ -240,7 +240,7 @@ impl BranchFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("branch_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -339,7 +339,7 @@ impl CopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -459,6 +459,8 @@ struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    search_effort: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     top_k: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
@@ -561,6 +563,13 @@ impl ExplainQueryRequest {
     /// How to rank the documents in the namespace.
     pub fn rank_by(mut self, rank_by: impl Into<RankBy>) -> Self {
         self.body.rank_by = Some(rank_by.into());
+        self
+    }
+
+    /// Multiplies the number of clusters searched by an ANN query. Higher values improve recall at the
+    /// cost of latency. Queried bytes are billed proportionally. Between 0.01 and 100, defaults to 1.
+    pub fn search_effort(mut self, search_effort: f64) -> Self {
+        self.body.search_effort = Some(search_effort);
         self
     }
 
@@ -976,6 +985,8 @@ struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rerank_by: Option<RerankModelParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    search_effort: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     top_k: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
@@ -1084,6 +1095,13 @@ impl QueryRequest {
     /// Rerank retrieved candidates with a model.
     pub fn rerank_by(mut self, rerank_by: impl Into<RerankModelParams>) -> Self {
         self.body.rerank_by = Some(rerank_by.into());
+        self
+    }
+
+    /// Multiplies the number of clusters searched by an ANN query. Higher values improve recall at the
+    /// cost of latency. Queried bytes are billed proportionally. Between 0.01 and 100, defaults to 1.
+    pub fn search_effort(mut self, search_effort: f64) -> Self {
+        self.body.search_effort = Some(search_effort);
         self
     }
 
@@ -1401,7 +1419,7 @@ impl StartCopyFromRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }

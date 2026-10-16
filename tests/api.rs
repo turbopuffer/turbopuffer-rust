@@ -73,7 +73,7 @@ async fn namespaces_branch_from() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
-        .and(body_json(json!({"source_namespace":"string"})))
+        .and(body_json(json!({"branch_from_namespace":{"source_namespace":"string"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":3}},"message":"string","rows_affected":3,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":3,"embedding_tokens":3},"rows_deleted":3,"rows_patched":3,"rows_remaining":true,"rows_upserted":3,"upserted_ids":[3]})))
         .mount(&server)
         .await;
@@ -95,7 +95,7 @@ async fn namespaces_copy_from() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
-        .and(body_json(json!({"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"})))
+        .and(body_json(json!({"copy_from_namespace":{"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":3}},"message":"string","rows_affected":3,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":3,"embedding_tokens":3},"rows_deleted":3,"rows_patched":3,"rows_remaining":true,"rows_upserted":3,"upserted_ids":[3]})))
         .mount(&server)
         .await;
@@ -141,7 +141,7 @@ async fn namespaces_explain_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/explain_query"))
-        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"top_k":3,"vector_encoding":"float"})))
+        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"search_effort":0.5,"top_k":3,"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"plan_text":"string"})))
         .mount(&server)
         .await;
@@ -160,6 +160,7 @@ async fn namespaces_explain_query() {
         .limit(3)
         .offset(3)
         .rank_by(RankBy::ann("string", [0.5]))
+        .search_effort(0.5)
         .top_k(3)
         .vector_encoding(VectorEncoding::Float)
         .send()
@@ -268,7 +269,7 @@ async fn namespaces_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/query"))
-        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"rerank_by":{"attribute":"string","model":"string","query":"string"},"top_k":3,"vector_encoding":"float"})))
+        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"rerank_by":{"attribute":"string","model":"string","query":"string"},"search_effort":0.5,"top_k":3,"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":3},"performance":{"approx_namespace_size":3,"cache_hit_ratio":0.5,"cache_temperature":"string","exhaustive_search_count":3,"query_execution_ms":3,"server_total_ms":3,"embedding_ms":3,"embedding_tokens":3},"aggregation_groups":[{"key":"value"}],"aggregations":{"key":"value"},"rows":[{"id":3}]})))
         .mount(&server)
         .await;
@@ -288,6 +289,7 @@ async fn namespaces_query() {
         .offset(3)
         .rank_by(RankBy::ann("string", [0.5]))
         .rerank_by(RerankModelParams::new("string", "string", "string"))
+        .search_effort(0.5)
         .top_k(3)
         .vector_encoding(VectorEncoding::Float)
         .send()
@@ -348,7 +350,7 @@ async fn namespaces_start_copy_from() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/async"))
-        .and(body_json(json!({"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"})))
+        .and(body_json(json!({"copy_from_namespace":{"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"string"},"source_api_key":"string","source_region":"string"}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token":"string"})))
         .mount(&server)
         .await;
