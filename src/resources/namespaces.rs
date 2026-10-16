@@ -240,7 +240,7 @@ impl BranchFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("branch_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -339,7 +339,7 @@ impl CopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -1401,7 +1401,7 @@ impl StartCopyFromRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -1727,7 +1727,7 @@ impl WriteRequest {
         self
     }
 
-    /// The patch and filter specifying which documents to patch.
+    /// Sets the attributes in `patch` on every document that matches `filters`.
     pub fn patch_by_filter(mut self, patch_by_filter: impl Into<PatchByFilter>) -> Self {
         self.body.patch_by_filter = Some(patch_by_filter.into());
         self
