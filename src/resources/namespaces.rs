@@ -1,7 +1,7 @@
 //! Operations on a single namespace, through the [`Namespace`] handle returned by
 //! [`Client::namespace`].
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::time::Duration;
@@ -240,7 +240,7 @@ impl BranchFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&HashMap::from([("branch_from_namespace", &self.body)]))?
+            .json(&BTreeMap::from([("branch_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -339,7 +339,7 @@ impl CopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
+            .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -437,9 +437,9 @@ pub struct ExplainQueryRequest {
 #[derive(Debug, Clone, Default, Serialize)]
 struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    aggregate_by: Option<HashMap<String, AggregateBy>>,
+    aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_attributes: Option<HashMap<String, Expr>>,
+    compute_attributes: Option<BTreeMap<String, Expr>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -459,7 +459,7 @@ struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
 }
@@ -565,7 +565,7 @@ impl ExplainQueryRequest {
     }
 
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -952,9 +952,9 @@ pub struct QueryRequest {
 #[derive(Debug, Clone, Default, Serialize)]
 struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    aggregate_by: Option<HashMap<String, AggregateBy>>,
+    aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_attributes: Option<HashMap<String, Expr>>,
+    compute_attributes: Option<BTreeMap<String, Expr>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -976,7 +976,7 @@ struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rerank_by: Option<RerankModelParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
 }
@@ -1088,7 +1088,7 @@ impl QueryRequest {
     }
 
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -1164,11 +1164,11 @@ struct RecallBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     include_ground_truth: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    num: Option<i64>,
+    num: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
 }
 
 impl RecallRequest {
@@ -1194,7 +1194,7 @@ impl RecallRequest {
     }
 
     /// The number of searches to run.
-    pub fn num(mut self, num: i64) -> Self {
+    pub fn num(mut self, num: u64) -> Self {
         self.body.num = Some(num);
         self
     }
@@ -1206,7 +1206,7 @@ impl RecallRequest {
     }
 
     /// Search for `top_k` nearest neighbors.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -1401,7 +1401,7 @@ impl StartCopyFromRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
-            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
+            .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -1522,7 +1522,7 @@ impl IntoFuture for UpdateMetadataRequest {
 pub struct UpdateSchemaRequest {
     client: Client,
     namespace: String,
-    body: HashMap<String, AttributeSchema>,
+    body: BTreeMap<String, AttributeSchema>,
     options: RequestOptions,
 }
 
@@ -1530,7 +1530,7 @@ impl UpdateSchemaRequest {
     pub(crate) fn new(
         client: Client,
         namespace: String,
-        schema: HashMap<String, AttributeSchema>,
+        schema: BTreeMap<String, AttributeSchema>,
     ) -> Self {
         Self {
             client,
@@ -1633,7 +1633,7 @@ struct WriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     return_affected_ids: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    schema: Option<HashMap<String, AttributeSchema>>,
+    schema: Option<BTreeMap<String, AttributeSchema>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sharding: Option<ShardingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1727,7 +1727,7 @@ impl WriteRequest {
         self
     }
 
-    /// The patch and filter specifying which documents to patch.
+    /// Sets the attributes in `patch` on every document that matches `filters`.
     pub fn patch_by_filter(mut self, patch_by_filter: impl Into<PatchByFilter>) -> Self {
         self.body.patch_by_filter = Some(patch_by_filter.into());
         self
