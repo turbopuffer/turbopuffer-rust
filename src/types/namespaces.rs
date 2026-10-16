@@ -76,29 +76,17 @@ pub struct QueryBilling {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Id {
-    /// An integer ID.
-    Int(i64),
+    /// An unsigned 64-bit integer ID.
+    Int(u64),
     /// A string ID.
     String(String),
     /// A value not known to this version of the SDK.
     Other(Value),
 }
 
-impl From<i64> for Id {
-    fn from(value: i64) -> Self {
+impl From<u64> for Id {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for Id {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for Id {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -121,6 +109,22 @@ impl std::fmt::Display for Id {
             Self::String(value) => value.fmt(f),
             Self::Other(value) => value.fmt(f),
         }
+    }
+}
+
+impl From<Id> for Value {
+    fn from(value: Id) -> Self {
+        match value {
+            Id::Int(value) => value.into(),
+            Id::String(value) => value.into(),
+            Id::Other(value) => value,
+        }
+    }
+}
+
+impl From<&Id> for Value {
+    fn from(value: &Id) -> Self {
+        value.clone().into()
     }
 }
 
@@ -250,6 +254,12 @@ impl<'de> Deserialize<'de> for AggregateBy {
         Err(serde::de::Error::custom(format!(
             "invalid AggregateBy: {value}"
         )))
+    }
+}
+
+impl From<AggregateBy> for Value {
+    fn from(value: AggregateBy) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -426,6 +436,12 @@ impl<'de> Deserialize<'de> for Expr {
     }
 }
 
+impl From<Expr> for Value {
+    fn from(value: Expr) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// A reference to an attribute in a new document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -441,6 +457,12 @@ impl ExprRefNew {
         Self {
             ref_new: ref_new.into(),
         }
+    }
+}
+
+impl From<ExprRefNew> for Value {
+    fn from(value: ExprRefNew) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -923,6 +945,12 @@ impl<'de> Deserialize<'de> for RankBy {
     }
 }
 
+impl From<RankBy> for Value {
+    fn from(value: RankBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
 /// [`RankByText::bm25`].
 #[derive(Debug, Clone, PartialEq)]
@@ -1211,6 +1239,12 @@ impl<'de> Deserialize<'de> for RankByText {
         Err(serde::de::Error::custom(format!(
             "invalid RankByText: {value}"
         )))
+    }
+}
+
+impl From<RankByText> for Value {
+    fn from(value: RankByText) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2212,6 +2246,12 @@ impl<'de> Deserialize<'de> for Filter {
     }
 }
 
+impl From<Filter> for Value {
+    fn from(value: Filter) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Additional parameters for the Fuzzy filter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -2417,6 +2457,12 @@ impl<'de> Deserialize<'de> for RankByAttribute {
         Err(serde::de::Error::custom(format!(
             "invalid RankByAttribute: {value}"
         )))
+    }
+}
+
+impl From<RankByAttribute> for Value {
+    fn from(value: RankByAttribute) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -2671,6 +2717,12 @@ impl<'de> Deserialize<'de> for GroupBy {
     }
 }
 
+impl From<GroupBy> for Value {
+    fn from(value: GroupBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// A function that produces group keys.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
@@ -2716,6 +2768,12 @@ impl<'de> Deserialize<'de> for GroupByFunction {
         Err(serde::de::Error::custom(format!(
             "invalid GroupByFunction: {value}"
         )))
+    }
+}
+
+impl From<GroupByFunction> for Value {
+    fn from(value: GroupByFunction) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -3706,6 +3764,11 @@ pub struct Query {
     /// How to rank the documents in the namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rank_by: Option<RankBy>,
+    /// Multiplies the number of clusters searched by an ANN query. Higher values improve recall at
+    /// the cost of latency. Queried bytes are billed proportionally. Between 0.01 and 100, defaults
+    /// to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_effort: Option<f64>,
     /// The number of results to return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_k: Option<i64>,
@@ -3797,6 +3860,13 @@ impl Query {
     /// How to rank the documents in the namespace.
     pub fn rank_by(mut self, rank_by: impl Into<RankBy>) -> Self {
         self.rank_by = Some(rank_by.into());
+        self
+    }
+
+    /// Multiplies the number of clusters searched by an ANN query. Higher values improve recall at the
+    /// cost of latency. Queried bytes are billed proportionally. Between 0.01 and 100, defaults to 1.
+    pub fn search_effort(mut self, search_effort: f64) -> Self {
+        self.search_effort = Some(search_effort);
         self
     }
 
@@ -3929,6 +3999,12 @@ impl<'de> Deserialize<'de> for RerankBy {
     }
 }
 
+impl From<RerankBy> for Value {
+    fn from(value: RerankBy) -> Self {
+        expression_to_json(value)
+    }
+}
+
 /// Configuration options for RRF.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
@@ -3986,6 +4062,12 @@ impl RerankModelParams {
             model: model.into(),
             query: query.into(),
         }
+    }
+}
+
+impl From<RerankModelParams> for Value {
+    fn from(value: RerankModelParams) -> Self {
+        expression_to_json(value)
     }
 }
 
@@ -4599,9 +4681,9 @@ pub enum ColumnsVector {
     Vector(Vector),
 }
 
-impl From<Vec<Vector>> for ColumnsVector {
-    fn from(value: Vec<Vector>) -> Self {
-        Self::Array(value)
+impl<T: Into<Vector>> From<Vec<T>> for ColumnsVector {
+    fn from(value: Vec<T>) -> Self {
+        Self::Array(value.into_iter().map(Into::into).collect())
     }
 }
 
@@ -4611,9 +4693,9 @@ impl From<&[Vector]> for ColumnsVector {
     }
 }
 
-impl<const N: usize> From<[Vector; N]> for ColumnsVector {
-    fn from(value: [Vector; N]) -> Self {
-        Self::Array(value.into())
+impl<T: Into<Vector>, const N: usize> From<[T; N]> for ColumnsVector {
+    fn from(value: [T; N]) -> Self {
+        Self::Array(value.into_iter().map(Into::into).collect())
     }
 }
 
