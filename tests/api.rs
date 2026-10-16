@@ -5,8 +5,8 @@ use serde_json::json;
 use turbopuffer::Client;
 use turbopuffer::types::{
     AggregateBy, Columns, DistanceMetric, EncryptionCustomerManaged, Expr, Filter, GroupBy,
-    PatchByFilter, Query, QueryConfigConsistency, RankBy, RerankBy, RerankModelParams, Row,
-    ShardingConfig, VectorEncoding,
+    PatchByFilter, Query, QueryConfigConsistency, QueryEffort, RankBy, RerankBy, RerankModelParams,
+    Row, ShardingConfig, VectorEncoding,
 };
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -141,7 +141,7 @@ async fn namespaces_explain_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/explain_query"))
-        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"top_k":3,"vector_encoding":"float"})))
+        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","effort":{},"exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"top_k":3,"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"plan_text":"string"})))
         .mount(&server)
         .await;
@@ -153,6 +153,7 @@ async fn namespaces_explain_query() {
         .compute_attributes([("key", Expr::embed("string"))])
         .consistency(QueryConfigConsistency::new())
         .distance_metric(DistanceMetric::CosineDistance)
+        .effort(QueryEffort::new())
         .exclude_attributes(["string"])
         .filters(Filter::eq("string", "value"))
         .group_by([GroupBy::attr("string")])
@@ -268,7 +269,7 @@ async fn namespaces_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/query"))
-        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"rerank_by":{"attribute":"string","model":"string","query":"string"},"top_k":3,"vector_encoding":"float"})))
+        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","string"]},"consistency":{},"distance_metric":"cosine_distance","effort":{},"exclude_attributes":["string"],"filters":["string","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["string","ANN",[0.5]],"rerank_by":{"attribute":"string","model":"string","query":"string"},"top_k":3,"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":3},"performance":{"approx_namespace_size":3,"cache_hit_ratio":0.5,"cache_temperature":"string","exhaustive_search_count":3,"query_execution_ms":3,"server_total_ms":3,"embedding_ms":3,"embedding_tokens":3},"aggregation_groups":[{"key":"value"}],"aggregations":{"key":"value"},"rows":[{"id":3}]})))
         .mount(&server)
         .await;
@@ -280,6 +281,7 @@ async fn namespaces_query() {
         .compute_attributes([("key", Expr::embed("string"))])
         .consistency(QueryConfigConsistency::new())
         .distance_metric(DistanceMetric::CosineDistance)
+        .effort(QueryEffort::new())
         .exclude_attributes(["string"])
         .filters(Filter::eq("string", "value"))
         .group_by([GroupBy::attr("string")])
