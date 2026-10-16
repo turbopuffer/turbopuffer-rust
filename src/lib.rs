@@ -6,6 +6,7 @@ mod client;
 mod error;
 pub mod pagination;
 pub mod resources;
+mod row;
 mod transport;
 pub mod types;
 
