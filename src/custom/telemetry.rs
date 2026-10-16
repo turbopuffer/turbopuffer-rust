@@ -392,7 +392,7 @@ impl RequestObserver for TelemetryObserver {
         Some(Box::new(TelemetryScope {
             buffer: self.buffer.clone(),
             route: route_template(info.method, info.url),
-            batch: self.buffer.take(),
+            batch: None,
         }))
     }
 }
@@ -405,7 +405,11 @@ struct TelemetryScope {
 }
 
 impl RequestScope for TelemetryScope {
-    fn attempt_begin(&mut self, _attempt: u32, request: &mut reqwest::Request) {
+    fn attempt_begin(&mut self, attempt: u32, request: &mut reqwest::Request) {
+        // Taken only once a request is about to be sent, so one that fails before then can't lose it.
+        if attempt == 0 {
+            self.batch = self.buffer.take();
+        }
         if let Some(header) = self.batch.as_ref().and_then(|batch| batch.header.clone()) {
             request.headers_mut().insert(HEADER, header);
         }
@@ -742,6 +746,34 @@ mod tests {
         let envelope: Value =
             serde_json::from_str(buffer.take().unwrap().header.unwrap().to_str().unwrap()).unwrap();
         assert!(envelope.get("dropped").is_none());
+    }
+
+    #[test]
+    fn takes_records_when_the_first_attempt_begins() {
+        let buffer = Arc::new(Buffer::new());
+        buffer.record(record(200));
+        let observer = TelemetryObserver {
+            buffer: buffer.clone(),
+        };
+        let url = "/v2/namespaces/my-ns/query";
+        let mut scope = observer
+            .start(&RequestInfo {
+                method: &Method::POST,
+                url,
+            })
+            .unwrap();
+
+        // A request that fails before it's sent never takes them.
+        let held = buffer.take().unwrap();
+        buffer.restore(held);
+
+        let mut request = reqwest::Request::new(
+            Method::POST,
+            format!("http://localhost{url}").parse().unwrap(),
+        );
+        scope.attempt_begin(0, &mut request);
+        assert!(request.headers().contains_key(HEADER));
+        assert!(buffer.take().is_none());
     }
 
     #[test]
