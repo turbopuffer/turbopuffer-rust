@@ -240,7 +240,7 @@ impl BranchFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("branch_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -339,7 +339,7 @@ impl CopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -459,7 +459,7 @@ struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
 }
@@ -565,7 +565,7 @@ impl ExplainQueryRequest {
     }
 
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -976,7 +976,7 @@ struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rerank_by: Option<RerankModelParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
 }
@@ -1088,7 +1088,7 @@ impl QueryRequest {
     }
 
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -1164,11 +1164,11 @@ struct RecallBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     include_ground_truth: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    num: Option<i64>,
+    num: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
 }
 
 impl RecallRequest {
@@ -1194,7 +1194,7 @@ impl RecallRequest {
     }
 
     /// The number of searches to run.
-    pub fn num(mut self, num: i64) -> Self {
+    pub fn num(mut self, num: u64) -> Self {
         self.body.num = Some(num);
         self
     }
@@ -1206,7 +1206,7 @@ impl RecallRequest {
     }
 
     /// Search for `top_k` nearest neighbors.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -1401,7 +1401,7 @@ impl StartCopyFromRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
-            .json(&self.body)?
+            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
