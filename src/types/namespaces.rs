@@ -3,7 +3,7 @@
 #[allow(unused_imports)]
 use super::*;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -19,7 +19,7 @@ pub struct WriteResult {
     /// A message describing the result of the write request.
     pub message: String,
     /// The number of rows affected by the write request.
-    pub rows_affected: i64,
+    pub rows_affected: u64,
     /// The IDs of documents that were deleted. Only included when `return_affected_ids` is true and
     /// at least one document was deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -33,16 +33,16 @@ pub struct WriteResult {
     pub performance: Option<WritePerformance>,
     /// The number of rows deleted by the write request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rows_deleted: Option<i64>,
+    pub rows_deleted: Option<u64>,
     /// The number of rows patched by the write request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rows_patched: Option<i64>,
+    pub rows_patched: Option<u64>,
     /// Whether more documents match the filter for partial operations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows_remaining: Option<bool>,
     /// The number of rows upserted by the write request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rows_upserted: Option<i64>,
+    pub rows_upserted: Option<u64>,
     /// The IDs of documents that were upserted. Only included when `return_affected_ids` is true
     /// and at least one document was upserted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -54,7 +54,7 @@ pub struct WriteResult {
 #[non_exhaustive]
 pub struct WriteBilling {
     /// The number of billable logical bytes written to the namespace.
-    pub billable_logical_bytes_written: i64,
+    pub billable_logical_bytes_written: u64,
     /// The billing information for a query.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryBilling>,
@@ -65,13 +65,13 @@ pub struct WriteBilling {
 #[non_exhaustive]
 pub struct QueryBilling {
     /// The number of billable logical bytes queried from the namespace.
-    pub billable_logical_bytes_queried: i64,
+    pub billable_logical_bytes_queried: u64,
     /// The number of billable logical bytes returned from the query.
-    pub billable_logical_bytes_returned: i64,
+    pub billable_logical_bytes_returned: u64,
 }
 
 /// An identifier for a document.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
@@ -133,13 +133,13 @@ impl From<&Id> for Value {
 #[non_exhaustive]
 pub struct WritePerformance {
     /// Request time measured on the server, in milliseconds.
-    pub server_total_ms: i64,
+    pub server_total_ms: u64,
     /// Time spent embedding text, in milliseconds. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_ms: Option<i64>,
+    pub embedding_ms: Option<u64>,
     /// The number of tokens embedded. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_tokens: Option<i64>,
+    pub embedding_tokens: Option<u64>,
 }
 
 /// The encryption configuration for a namespace.
@@ -502,7 +502,7 @@ pub struct HighlightConfigParams {
     pub fragment_by: Option<HighlightFragmentBy>,
     /// The maximum number of fragments to return. Defaults to `3`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fragment_limit: Option<i64>,
+    pub fragment_limit: Option<u64>,
     /// The units to report highlighted fragment offsets in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_offsets: Option<HighlightOffsetUnits>,
@@ -525,7 +525,7 @@ impl HighlightConfigParams {
     }
 
     /// The maximum number of fragments to return. Defaults to `3`.
-    pub fn fragment_limit(mut self, fragment_limit: i64) -> Self {
+    pub fn fragment_limit(mut self, fragment_limit: u64) -> Self {
         self.fragment_limit = Some(fragment_limit);
         self
     }
@@ -674,50 +674,14 @@ pub enum RankBy {
     Ann {
         /// The name of the attribute to rank by.
         attr: String,
-        /// The query vector.
-        value: Vec<f32>,
-    },
-    /// Rank by approximate nearest neighbor (ANN) search with late interaction. A document's
-    /// distance is the sum of the distances from each query vector to its closest vector in the
-    /// document's vector array.
-    AnnMulti {
-        /// The name of the vector array attribute to rank by.
-        attr: String,
-        /// The query vectors, e.g. one per query token.
-        value: Vec<Vec<f32>>,
-    },
-    /// Rank by approximate nearest neighbor (ANN) search, with the query vector computed by an
-    /// expression, e.g. by embedding text with `Embed`.
-    AnnExpr {
-        /// The name of the embedded attribute to rank by.
-        attr: String,
-        /// An expression that computes a value.
-        expr: Box<Expr>,
+        value: RankByAnnValue,
     },
     /// Rank by exact nearest neighbor (kNN) search, ordering documents by the distance between
     /// their vector and the query vector, closest first. Requires `filters`.
     Knn {
         /// The name of the attribute to rank by.
         attr: String,
-        /// The query vector.
-        value: Vec<f32>,
-    },
-    /// Rank by exact nearest neighbor (kNN) search with late interaction. A document's distance is
-    /// the sum of the distances from each query vector to its closest vector in the document's
-    /// vector array.
-    KnnMulti {
-        /// The name of the vector array attribute to rank by.
-        attr: String,
-        /// The query vectors, e.g. one per query token.
-        value: Vec<Vec<f32>>,
-    },
-    /// Rank by exact nearest neighbor (kNN) search, with the query vector computed by an
-    /// expression, e.g. by embedding text with `Embed`. Requires `filters`.
-    KnnExpr {
-        /// The name of the embedded attribute to rank by.
-        attr: String,
-        /// An expression that computes a value.
-        expr: Box<Expr>,
+        value: RankByKnnValue,
     },
     /// Rank by the distance between a sparse vector attribute and a sparse query vector.
     SparseKnn {
@@ -725,7 +689,7 @@ pub enum RankBy {
         attr: String,
         /// A sparse vector represented as a map from string dimension names to float weights. For
         /// example: `{"token_a": 0.5, "token_b": 1.2}`.
-        value: HashMap<String, f64>,
+        value: BTreeMap<String, f64>,
     },
     /// Rank by BM25 (Best Matching 25, a classic full-text search scoring function, which scores
     /// documents higher when they contain more of the query's terms, especially rare ones), or by
@@ -742,57 +706,19 @@ pub enum RankBy {
 impl RankBy {
     /// Rank by approximate nearest neighbor (ANN) search, ordering documents by the distance between
     /// their vector and the query vector, closest first.
-    pub fn ann(attr: impl Into<String>, value: impl Into<Vec<f32>>) -> Self {
+    pub fn ann(attr: impl Into<String>, value: impl Into<RankByAnnValue>) -> Self {
         Self::Ann {
             attr: attr.into(),
             value: value.into(),
         }
     }
 
-    /// Rank by approximate nearest neighbor (ANN) search with late interaction. A document's distance
-    /// is the sum of the distances from each query vector to its closest vector in the document's
-    /// vector array.
-    pub fn ann_multi(attr: impl Into<String>, value: impl Into<Vec<Vec<f32>>>) -> Self {
-        Self::AnnMulti {
-            attr: attr.into(),
-            value: value.into(),
-        }
-    }
-
-    /// Rank by approximate nearest neighbor (ANN) search, with the query vector computed by an
-    /// expression, e.g. by embedding text with `Embed`.
-    pub fn ann_expr(attr: impl Into<String>, expr: impl Into<Expr>) -> Self {
-        Self::AnnExpr {
-            attr: attr.into(),
-            expr: Box::new(expr.into()),
-        }
-    }
-
     /// Rank by exact nearest neighbor (kNN) search, ordering documents by the distance between their
     /// vector and the query vector, closest first. Requires `filters`.
-    pub fn knn(attr: impl Into<String>, value: impl Into<Vec<f32>>) -> Self {
+    pub fn knn(attr: impl Into<String>, value: impl Into<RankByKnnValue>) -> Self {
         Self::Knn {
             attr: attr.into(),
             value: value.into(),
-        }
-    }
-
-    /// Rank by exact nearest neighbor (kNN) search with late interaction. A document's distance is the
-    /// sum of the distances from each query vector to its closest vector in the document's vector
-    /// array.
-    pub fn knn_multi(attr: impl Into<String>, value: impl Into<Vec<Vec<f32>>>) -> Self {
-        Self::KnnMulti {
-            attr: attr.into(),
-            value: value.into(),
-        }
-    }
-
-    /// Rank by exact nearest neighbor (kNN) search, with the query vector computed by an expression,
-    /// e.g. by embedding text with `Embed`. Requires `filters`.
-    pub fn knn_expr(attr: impl Into<String>, expr: impl Into<Expr>) -> Self {
-        Self::KnnExpr {
-            attr: attr.into(),
-            expr: Box::new(expr.into()),
         }
     }
 
@@ -830,20 +756,8 @@ impl RankBy {
     /// query's terms, especially rare ones).
     ///
     /// Shorthand for [`RankByText::bm25`].
-    pub fn bm25(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn bm25(attr: impl Into<String>, value: impl Into<RankByTextBm25Value>) -> Self {
         RankByText::bm25(attr, value).into()
-    }
-
-    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
-    /// classic full-text search scoring function, which scores documents higher when they contain more
-    /// of the query's terms, especially rare ones).
-    ///
-    /// Shorthand for [`RankByText::bm25_array`].
-    pub fn bm25_array(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        RankByText::bm25_array(attr, value).into()
     }
 
     /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
@@ -853,23 +767,10 @@ impl RankBy {
     /// Shorthand for [`RankByText::bm25_with_params`].
     pub fn bm25_with_params(
         attr: impl Into<String>,
-        value: impl Into<String>,
+        value: impl Into<RankByTextBm25Value>,
         params: impl Into<Bm25ClauseParams>,
     ) -> Self {
         RankByText::bm25_with_params(attr, value, params).into()
-    }
-
-    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
-    /// classic full-text search scoring function, which scores documents higher when they contain more
-    /// of the query's terms, especially rare ones), with additional parameters.
-    ///
-    /// Shorthand for [`RankByText::bm25_array_with_params`].
-    pub fn bm25_array_with_params(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-        params: impl Into<Bm25ClauseParams>,
-    ) -> Self {
-        RankByText::bm25_array_with_params(attr, value, params).into()
     }
 
     /// Sum the scores of the subqueries.
@@ -950,11 +851,7 @@ impl Serialize for RankBy {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Ann { attr, value } => (attr, "ANN", value).serialize(serializer),
-            Self::AnnMulti { attr, value } => (attr, "ANN", value).serialize(serializer),
-            Self::AnnExpr { attr, expr } => (attr, "ANN", expr).serialize(serializer),
             Self::Knn { attr, value } => (attr, "kNN", value).serialize(serializer),
-            Self::KnnMulti { attr, value } => (attr, "kNN", value).serialize(serializer),
-            Self::KnnExpr { attr, expr } => (attr, "kNN", expr).serialize(serializer),
             Self::SparseKnn { attr, value } => (attr, "SparseKNN", value).serialize(serializer),
             Self::Text(value) => value.serialize(serializer),
             Self::Attribute(value) => value.serialize(serializer),
@@ -974,39 +871,11 @@ impl<'de> Deserialize<'de> for RankBy {
                 return Ok(Self::Ann { attr, value });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ANN")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::AnnMulti { attr, value });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ANN")]) {
-            if let (Some(attr), Some(expr)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::AnnExpr { attr, expr });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 3, &[(1, "kNN")]) {
             if let (Some(attr), Some(value)) =
                 (decode_element(&elements[0]), decode_element(&elements[2]))
             {
                 return Ok(Self::Knn { attr, value });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "kNN")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::KnnMulti { attr, value });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "kNN")]) {
-            if let (Some(attr), Some(expr)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::KnnExpr { attr, expr });
             }
         }
         if let Some(elements) = tuple_elements(&value, 3, &[(1, "SparseKNN")]) {
@@ -1050,17 +919,7 @@ pub enum RankByText {
     Bm25 {
         /// The name of the attribute to rank by.
         attr: String,
-        /// The string to search for.
-        value: String,
-    },
-    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching
-    /// 25, a classic full-text search scoring function, which scores documents higher when they
-    /// contain more of the query's terms, especially rare ones).
-    Bm25Array {
-        /// The name of the attribute to rank by.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: RankByTextBm25Value,
     },
     /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a
     /// classic full-text search scoring function, which scores documents higher when they contain
@@ -1068,19 +927,7 @@ pub enum RankByText {
     Bm25WithParams {
         /// The name of the attribute to rank by.
         attr: String,
-        /// The string to search for.
-        value: String,
-        /// Additional (optional) parameters for a single BM25 query clause.
-        params: Bm25ClauseParams,
-    },
-    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching
-    /// 25, a classic full-text search scoring function, which scores documents higher when they
-    /// contain more of the query's terms, especially rare ones), with additional parameters.
-    Bm25ArrayWithParams {
-        /// The name of the attribute to rank by.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: RankByTextBm25Value,
         /// Additional (optional) parameters for a single BM25 query clause.
         params: Bm25ClauseParams,
     },
@@ -1145,23 +992,10 @@ impl RankByText {
     /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
     /// full-text search scoring function, which scores documents higher when they contain more of the
     /// query's terms, especially rare ones).
-    pub fn bm25(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn bm25(attr: impl Into<String>, value: impl Into<RankByTextBm25Value>) -> Self {
         Self::Bm25 {
             attr: attr.into(),
             value: value.into(),
-        }
-    }
-
-    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
-    /// classic full-text search scoring function, which scores documents higher when they contain more
-    /// of the query's terms, especially rare ones).
-    pub fn bm25_array(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        Self::Bm25Array {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -1170,27 +1004,12 @@ impl RankByText {
     /// query's terms, especially rare ones), with additional parameters.
     pub fn bm25_with_params(
         attr: impl Into<String>,
-        value: impl Into<String>,
+        value: impl Into<RankByTextBm25Value>,
         params: impl Into<Bm25ClauseParams>,
     ) -> Self {
         Self::Bm25WithParams {
             attr: attr.into(),
             value: value.into(),
-            params: params.into(),
-        }
-    }
-
-    /// Rank by how relevant an attribute is to a list of query tokens, using BM25 (Best Matching 25, a
-    /// classic full-text search scoring function, which scores documents higher when they contain more
-    /// of the query's terms, especially rare ones), with additional parameters.
-    pub fn bm25_array_with_params(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-        params: impl Into<Bm25ClauseParams>,
-    ) -> Self {
-        Self::Bm25ArrayWithParams {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
             params: params.into(),
         }
     }
@@ -1271,13 +1090,7 @@ impl Serialize for RankByText {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Bm25 { attr, value } => (attr, "BM25", value).serialize(serializer),
-            Self::Bm25Array { attr, value } => (attr, "BM25", value).serialize(serializer),
             Self::Bm25WithParams {
-                attr,
-                value,
-                params,
-            } => (attr, "BM25", value, params).serialize(serializer),
-            Self::Bm25ArrayWithParams {
                 attr,
                 value,
                 params,
@@ -1309,13 +1122,6 @@ impl<'de> Deserialize<'de> for RankByText {
                 return Ok(Self::Bm25 { attr, value });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "BM25")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::Bm25Array { attr, value });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 4, &[(1, "BM25")]) {
             if let (Some(attr), Some(value), Some(params)) = (
                 decode_element(&elements[0]),
@@ -1323,19 +1129,6 @@ impl<'de> Deserialize<'de> for RankByText {
                 decode_element(&elements[3]),
             ) {
                 return Ok(Self::Bm25WithParams {
-                    attr,
-                    value,
-                    params,
-                });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 4, &[(1, "BM25")]) {
-            if let (Some(attr), Some(value), Some(params)) = (
-                decode_element(&elements[0]),
-                decode_element(&elements[2]),
-                decode_element(&elements[3]),
-            ) {
-                return Ok(Self::Bm25ArrayWithParams {
                     attr,
                     value,
                     params,
@@ -1603,34 +1396,14 @@ pub enum Filter {
     ContainsAllTokens {
         /// The name of the attribute to apply the filter to.
         attr: String,
-        /// The string to search for.
-        value: String,
-    },
-    /// Matches if all tokens in the input string are present in the attributes value. Requires that
-    /// the attribute is configured for full-text search.
-    ContainsAllTokensArray {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: FilterContainsAllTokensValue,
     },
     /// Matches if all tokens in the input string are present in the attributes value. Requires that
     /// the attribute is configured for full-text search.
     ContainsAllTokensWithParams {
         /// The name of the attribute to apply the filter to.
         attr: String,
-        /// The string to search for.
-        value: String,
-        /// Additional (optional) parameters for the ContainsAllTokens filter.
-        params: ContainsAllTokensFilterParams,
-    },
-    /// Matches if all tokens in the input string are present in the attributes value. Requires that
-    /// the attribute is configured for full-text search.
-    ContainsAllTokensArrayWithParams {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: FilterContainsAllTokensValue,
         /// Additional (optional) parameters for the ContainsAllTokens filter.
         params: ContainsAllTokensFilterParams,
     },
@@ -1639,34 +1412,14 @@ pub enum Filter {
     ContainsAnyToken {
         /// The name of the attribute to apply the filter to.
         attr: String,
-        /// The string to search for.
-        value: String,
-    },
-    /// Matches if any of the tokens in the input string array are present in the attribute value.
-    /// Requires that the attribute is configured for full-text search.
-    ContainsAnyTokenArray {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: FilterContainsAnyTokenValue,
     },
     /// Matches if any of the tokens in the input string are present in the attribute value.
     /// Requires that the attribute is configured for full-text search.
     ContainsAnyTokenWithParams {
         /// The name of the attribute to apply the filter to.
         attr: String,
-        /// The string to search for.
-        value: String,
-        /// Additional (optional) parameters for the ContainsAnyToken filter.
-        params: ContainsAnyTokenFilterParams,
-    },
-    /// Matches if any of the tokens in the input string array are present in the attribute value.
-    /// Requires that the attribute is configured for full-text search.
-    ContainsAnyTokenArrayWithParams {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: FilterContainsAnyTokenValue,
         /// Additional (optional) parameters for the ContainsAnyToken filter.
         params: ContainsAnyTokenFilterParams,
     },
@@ -1676,17 +1429,7 @@ pub enum Filter {
     ContainsTokenSequence {
         /// The name of the attribute to apply the filter to.
         attr: String,
-        /// The string to search for.
-        value: String,
-    },
-    /// Matches if all the tokens in the input string are present in the attribute value, in the
-    /// correct order (i.e., as a phrase). Requires that the attribute is configured for full-text
-    /// search.
-    ContainsTokenSequenceArray {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        /// The tokens to search for.
-        value: Vec<String>,
+        value: FilterContainsTokenSequenceValue,
     },
     /// Matches documents that don't match the filter.
     Not {
@@ -1914,7 +1657,10 @@ impl Filter {
 
     /// Matches if all tokens in the input string are present in the attributes value. Requires that the
     /// attribute is configured for full-text search.
-    pub fn contains_all_tokens(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn contains_all_tokens(
+        attr: impl Into<String>,
+        value: impl Into<FilterContainsAllTokensValue>,
+    ) -> Self {
         Self::ContainsAllTokens {
             attr: attr.into(),
             value: value.into(),
@@ -1923,21 +1669,9 @@ impl Filter {
 
     /// Matches if all tokens in the input string are present in the attributes value. Requires that the
     /// attribute is configured for full-text search.
-    pub fn contains_all_tokens_array(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        Self::ContainsAllTokensArray {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    /// Matches if all tokens in the input string are present in the attributes value. Requires that the
-    /// attribute is configured for full-text search.
     pub fn contains_all_tokens_with_params(
         attr: impl Into<String>,
-        value: impl Into<String>,
+        value: impl Into<FilterContainsAllTokensValue>,
         params: impl Into<ContainsAllTokensFilterParams>,
     ) -> Self {
         Self::ContainsAllTokensWithParams {
@@ -1947,38 +1681,15 @@ impl Filter {
         }
     }
 
-    /// Matches if all tokens in the input string are present in the attributes value. Requires that the
-    /// attribute is configured for full-text search.
-    pub fn contains_all_tokens_array_with_params(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-        params: impl Into<ContainsAllTokensFilterParams>,
-    ) -> Self {
-        Self::ContainsAllTokensArrayWithParams {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
-            params: params.into(),
-        }
-    }
-
     /// Matches if any of the tokens in the input string are present in the attribute value. Requires
     /// that the attribute is configured for full-text search.
-    pub fn contains_any_token(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn contains_any_token(
+        attr: impl Into<String>,
+        value: impl Into<FilterContainsAnyTokenValue>,
+    ) -> Self {
         Self::ContainsAnyToken {
             attr: attr.into(),
             value: value.into(),
-        }
-    }
-
-    /// Matches if any of the tokens in the input string array are present in the attribute value.
-    /// Requires that the attribute is configured for full-text search.
-    pub fn contains_any_token_array(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        Self::ContainsAnyTokenArray {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -1986,7 +1697,7 @@ impl Filter {
     /// that the attribute is configured for full-text search.
     pub fn contains_any_token_with_params(
         attr: impl Into<String>,
-        value: impl Into<String>,
+        value: impl Into<FilterContainsAnyTokenValue>,
         params: impl Into<ContainsAnyTokenFilterParams>,
     ) -> Self {
         Self::ContainsAnyTokenWithParams {
@@ -1996,38 +1707,15 @@ impl Filter {
         }
     }
 
-    /// Matches if any of the tokens in the input string array are present in the attribute value.
-    /// Requires that the attribute is configured for full-text search.
-    pub fn contains_any_token_array_with_params(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-        params: impl Into<ContainsAnyTokenFilterParams>,
-    ) -> Self {
-        Self::ContainsAnyTokenArrayWithParams {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
-            params: params.into(),
-        }
-    }
-
     /// Matches if all the tokens in the input string are present in the attribute value, in the correct
     /// order (i.e., as a phrase). Requires that the attribute is configured for full-text search.
-    pub fn contains_token_sequence(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn contains_token_sequence(
+        attr: impl Into<String>,
+        value: impl Into<FilterContainsTokenSequenceValue>,
+    ) -> Self {
         Self::ContainsTokenSequence {
             attr: attr.into(),
             value: value.into(),
-        }
-    }
-
-    /// Matches if all the tokens in the input string are present in the attribute value, in the correct
-    /// order (i.e., as a phrase). Requires that the attribute is configured for full-text search.
-    pub fn contains_token_sequence_array(
-        attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        Self::ContainsTokenSequenceArray {
-            attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -2088,15 +1776,7 @@ impl Serialize for Filter {
             Self::ContainsAllTokens { attr, value } => {
                 (attr, "ContainsAllTokens", value).serialize(serializer)
             }
-            Self::ContainsAllTokensArray { attr, value } => {
-                (attr, "ContainsAllTokens", value).serialize(serializer)
-            }
             Self::ContainsAllTokensWithParams {
-                attr,
-                value,
-                params,
-            } => (attr, "ContainsAllTokens", value, params).serialize(serializer),
-            Self::ContainsAllTokensArrayWithParams {
                 attr,
                 value,
                 params,
@@ -2104,23 +1784,12 @@ impl Serialize for Filter {
             Self::ContainsAnyToken { attr, value } => {
                 (attr, "ContainsAnyToken", value).serialize(serializer)
             }
-            Self::ContainsAnyTokenArray { attr, value } => {
-                (attr, "ContainsAnyToken", value).serialize(serializer)
-            }
             Self::ContainsAnyTokenWithParams {
                 attr,
                 value,
                 params,
             } => (attr, "ContainsAnyToken", value, params).serialize(serializer),
-            Self::ContainsAnyTokenArrayWithParams {
-                attr,
-                value,
-                params,
-            } => (attr, "ContainsAnyToken", value, params).serialize(serializer),
             Self::ContainsTokenSequence { attr, value } => {
-                (attr, "ContainsTokenSequence", value).serialize(serializer)
-            }
-            Self::ContainsTokenSequenceArray { attr, value } => {
                 (attr, "ContainsTokenSequence", value).serialize(serializer)
             }
             Self::Not { filter } => ("Not", filter).serialize(serializer),
@@ -2301,13 +1970,6 @@ impl<'de> Deserialize<'de> for Filter {
                 return Ok(Self::ContainsAllTokens { attr, value });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAllTokens")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::ContainsAllTokensArray { attr, value });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 4, &[(1, "ContainsAllTokens")]) {
             if let (Some(attr), Some(value), Some(params)) = (
                 decode_element(&elements[0]),
@@ -2321,31 +1983,11 @@ impl<'de> Deserialize<'de> for Filter {
                 });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 4, &[(1, "ContainsAllTokens")]) {
-            if let (Some(attr), Some(value), Some(params)) = (
-                decode_element(&elements[0]),
-                decode_element(&elements[2]),
-                decode_element(&elements[3]),
-            ) {
-                return Ok(Self::ContainsAllTokensArrayWithParams {
-                    attr,
-                    value,
-                    params,
-                });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAnyToken")]) {
             if let (Some(attr), Some(value)) =
                 (decode_element(&elements[0]), decode_element(&elements[2]))
             {
                 return Ok(Self::ContainsAnyToken { attr, value });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAnyToken")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::ContainsAnyTokenArray { attr, value });
             }
         }
         if let Some(elements) = tuple_elements(&value, 4, &[(1, "ContainsAnyToken")]) {
@@ -2361,31 +2003,11 @@ impl<'de> Deserialize<'de> for Filter {
                 });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 4, &[(1, "ContainsAnyToken")]) {
-            if let (Some(attr), Some(value), Some(params)) = (
-                decode_element(&elements[0]),
-                decode_element(&elements[2]),
-                decode_element(&elements[3]),
-            ) {
-                return Ok(Self::ContainsAnyTokenArrayWithParams {
-                    attr,
-                    value,
-                    params,
-                });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsTokenSequence")]) {
             if let (Some(attr), Some(value)) =
                 (decode_element(&elements[0]), decode_element(&elements[2]))
             {
                 return Ok(Self::ContainsTokenSequence { attr, value });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsTokenSequence")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::ContainsTokenSequenceArray { attr, value });
             }
         }
         if let Some(elements) = tuple_elements(&value, 2, &[(0, "Not")]) {
@@ -2452,12 +2074,12 @@ pub struct FuzzyMaxEditDistance {
     pub distance: u64,
     /// Minimum number of characters in a query where this distance applies. Must be at least 3 ·
     /// (distance + 1).
-    pub min_query_chars: i64,
+    pub min_query_chars: u64,
 }
 
 impl FuzzyMaxEditDistance {
     /// Creates a new [`FuzzyMaxEditDistance`] from its required fields.
-    pub fn new(distance: u64, min_query_chars: i64) -> Self {
+    pub fn new(distance: u64, min_query_chars: u64) -> Self {
         Self {
             distance,
             min_query_chars,
@@ -2506,6 +2128,150 @@ impl ContainsAnyTokenFilterParams {
     pub fn last_as_prefix(mut self, last_as_prefix: bool) -> Self {
         self.last_as_prefix = Some(last_as_prefix);
         self
+    }
+}
+
+/// One of the shapes `ContainsAllTokens` accepts for its `value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum FilterContainsAllTokensValue {
+    /// The string to search for.
+    String(String),
+    /// The tokens to search for.
+    Array(Vec<String>),
+}
+
+impl From<String> for FilterContainsAllTokensValue {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for FilterContainsAllTokensValue {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl From<Vec<String>> for FilterContainsAllTokensValue {
+    fn from(value: Vec<String>) -> Self {
+        Self::Array(value)
+    }
+}
+
+impl From<Vec<&str>> for FilterContainsAllTokensValue {
+    fn from(value: Vec<&str>) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<&[&str]> for FilterContainsAllTokensValue {
+    fn from(value: &[&str]) -> Self {
+        Self::Array(value.iter().map(|s| (*s).to_owned()).collect())
+    }
+}
+
+impl<const N: usize> From<[&str; N]> for FilterContainsAllTokensValue {
+    fn from(value: [&str; N]) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+/// One of the shapes `ContainsAnyToken` accepts for its `value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum FilterContainsAnyTokenValue {
+    /// The string to search for.
+    String(String),
+    /// The tokens to search for.
+    Array(Vec<String>),
+}
+
+impl From<String> for FilterContainsAnyTokenValue {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for FilterContainsAnyTokenValue {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl From<Vec<String>> for FilterContainsAnyTokenValue {
+    fn from(value: Vec<String>) -> Self {
+        Self::Array(value)
+    }
+}
+
+impl From<Vec<&str>> for FilterContainsAnyTokenValue {
+    fn from(value: Vec<&str>) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<&[&str]> for FilterContainsAnyTokenValue {
+    fn from(value: &[&str]) -> Self {
+        Self::Array(value.iter().map(|s| (*s).to_owned()).collect())
+    }
+}
+
+impl<const N: usize> From<[&str; N]> for FilterContainsAnyTokenValue {
+    fn from(value: [&str; N]) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+/// One of the shapes `ContainsTokenSequence` accepts for its `value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum FilterContainsTokenSequenceValue {
+    /// The string to search for.
+    String(String),
+    /// The tokens to search for.
+    Array(Vec<String>),
+}
+
+impl From<String> for FilterContainsTokenSequenceValue {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for FilterContainsTokenSequenceValue {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl From<Vec<String>> for FilterContainsTokenSequenceValue {
+    fn from(value: Vec<String>) -> Self {
+        Self::Array(value)
+    }
+}
+
+impl From<Vec<&str>> for FilterContainsTokenSequenceValue {
+    fn from(value: Vec<&str>) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<&[&str]> for FilterContainsTokenSequenceValue {
+    fn from(value: &[&str]) -> Self {
+        Self::Array(value.iter().map(|s| (*s).to_owned()).collect())
+    }
+}
+
+impl<const N: usize> From<[&str; N]> for FilterContainsTokenSequenceValue {
+    fn from(value: [&str; N]) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
     }
 }
 
@@ -2568,6 +2334,54 @@ impl DecayParams {
     pub fn midpoint(mut self, midpoint: impl Into<Value>) -> Self {
         self.midpoint = Some(midpoint.into());
         self
+    }
+}
+
+/// One of the shapes `BM25` accepts for its `value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum RankByTextBm25Value {
+    /// The string to search for.
+    String(String),
+    /// The tokens to search for.
+    Array(Vec<String>),
+}
+
+impl From<String> for RankByTextBm25Value {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for RankByTextBm25Value {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl From<Vec<String>> for RankByTextBm25Value {
+    fn from(value: Vec<String>) -> Self {
+        Self::Array(value)
+    }
+}
+
+impl From<Vec<&str>> for RankByTextBm25Value {
+    fn from(value: Vec<&str>) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<&[&str]> for RankByTextBm25Value {
+    fn from(value: &[&str]) -> Self {
+        Self::Array(value.iter().map(|s| (*s).to_owned()).collect())
+    }
+}
+
+impl<const N: usize> From<[&str; N]> for RankByTextBm25Value {
+    fn from(value: [&str; N]) -> Self {
+        Self::Array(value.into_iter().map(str::to_owned).collect())
     }
 }
 
@@ -2676,6 +2490,130 @@ impl From<&str> for RankByAttributeOrder {
 impl From<String> for RankByAttributeOrder {
     fn from(value: String) -> Self {
         Self::from(value.as_str())
+    }
+}
+
+/// One of the shapes `ANN` accepts for its `value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum RankByAnnValue {
+    /// The query vector.
+    Vector(Vec<f32>),
+    /// The query vectors, e.g. one per query token.
+    Multi(Vec<Vec<f32>>),
+    /// An expression that computes a value.
+    Expr(Box<Expr>),
+}
+
+impl From<Vec<f32>> for RankByAnnValue {
+    fn from(value: Vec<f32>) -> Self {
+        Self::Vector(value)
+    }
+}
+
+impl From<&[f32]> for RankByAnnValue {
+    fn from(value: &[f32]) -> Self {
+        Self::Vector(value.to_vec())
+    }
+}
+
+impl<const N: usize> From<[f32; N]> for RankByAnnValue {
+    fn from(value: [f32; N]) -> Self {
+        Self::Vector(value.into())
+    }
+}
+
+impl From<Vec<Vec<f32>>> for RankByAnnValue {
+    fn from(value: Vec<Vec<f32>>) -> Self {
+        Self::Multi(value)
+    }
+}
+
+impl From<&[Vec<f32>]> for RankByAnnValue {
+    fn from(value: &[Vec<f32>]) -> Self {
+        Self::Multi(value.to_vec())
+    }
+}
+
+impl<const N: usize> From<[Vec<f32>; N]> for RankByAnnValue {
+    fn from(value: [Vec<f32>; N]) -> Self {
+        Self::Multi(value.into())
+    }
+}
+
+impl<const M: usize, const N: usize> From<[[f32; M]; N]> for RankByAnnValue {
+    fn from(value: [[f32; M]; N]) -> Self {
+        Self::Multi(value.into_iter().map(Vec::from).collect())
+    }
+}
+
+impl From<Expr> for RankByAnnValue {
+    fn from(value: Expr) -> Self {
+        Self::Expr(Box::new(value))
+    }
+}
+
+/// One of the shapes `kNN` accepts for its `value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
+pub enum RankByKnnValue {
+    /// The query vector.
+    Vector(Vec<f32>),
+    /// The query vectors, e.g. one per query token.
+    Multi(Vec<Vec<f32>>),
+    /// An expression that computes a value.
+    Expr(Box<Expr>),
+}
+
+impl From<Vec<f32>> for RankByKnnValue {
+    fn from(value: Vec<f32>) -> Self {
+        Self::Vector(value)
+    }
+}
+
+impl From<&[f32]> for RankByKnnValue {
+    fn from(value: &[f32]) -> Self {
+        Self::Vector(value.to_vec())
+    }
+}
+
+impl<const N: usize> From<[f32; N]> for RankByKnnValue {
+    fn from(value: [f32; N]) -> Self {
+        Self::Vector(value.into())
+    }
+}
+
+impl From<Vec<Vec<f32>>> for RankByKnnValue {
+    fn from(value: Vec<Vec<f32>>) -> Self {
+        Self::Multi(value)
+    }
+}
+
+impl From<&[Vec<f32>]> for RankByKnnValue {
+    fn from(value: &[Vec<f32>]) -> Self {
+        Self::Multi(value.to_vec())
+    }
+}
+
+impl<const N: usize> From<[Vec<f32>; N]> for RankByKnnValue {
+    fn from(value: [Vec<f32>; N]) -> Self {
+        Self::Multi(value.into())
+    }
+}
+
+impl<const M: usize, const N: usize> From<[[f32; M]; N]> for RankByKnnValue {
+    fn from(value: [[f32; M]; N]) -> Self {
+        Self::Multi(value.into_iter().map(Vec::from).collect())
+    }
+}
+
+impl From<Expr> for RankByKnnValue {
+    fn from(value: Expr) -> Self {
+        Self::Expr(Box::new(value))
     }
 }
 
@@ -2814,7 +2752,7 @@ pub enum GroupBy {
     /// An attribute name to group documents by.
     Attr(String),
     /// An expression to group documents by, with an explicit output attribute name.
-    Expr(HashMap<String, GroupByFunction>),
+    Expr(BTreeMap<String, GroupByFunction>),
 }
 
 #[allow(deprecated)]
@@ -2849,8 +2787,8 @@ impl From<&str> for GroupBy {
     }
 }
 
-impl From<HashMap<String, GroupByFunction>> for GroupBy {
-    fn from(value: HashMap<String, GroupByFunction>) -> Self {
+impl From<BTreeMap<String, GroupByFunction>> for GroupBy {
+    fn from(value: BTreeMap<String, GroupByFunction>) -> Self {
         Self::Expr(value)
     }
 }
@@ -2990,26 +2928,14 @@ impl<const N: usize> From<[&str; N]> for IncludeAttributes {
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum QueryLimit {
-    Int(i64),
+    Int(u64),
     /// Limits the documents returned by a query.
     Limit(Limit),
 }
 
-impl From<i64> for QueryLimit {
-    fn from(value: i64) -> Self {
+impl From<u64> for QueryLimit {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for QueryLimit {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for QueryLimit {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -3024,7 +2950,7 @@ impl From<Limit> for QueryLimit {
 #[non_exhaustive]
 pub struct Limit {
     /// Limits the total number of documents returned.
-    pub total: i64,
+    pub total: u64,
     /// Limits the number of documents with the same value for a set of attributes (the "limit key")
     /// that can appear in the results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3033,7 +2959,7 @@ pub struct Limit {
 
 impl Limit {
     /// Creates a new [`Limit`] from its required fields.
-    pub fn new(total: i64) -> Self {
+    pub fn new(total: u64) -> Self {
         Self {
             total,
             per: Default::default(),
@@ -3056,12 +2982,12 @@ pub struct LimitPer {
     /// The attributes to include in the limit key.
     pub attributes: Vec<String>,
     /// The maximum number of documents to return for each value of the limit key.
-    pub limit: i64,
+    pub limit: u64,
 }
 
 impl LimitPer {
     /// Creates a new [`LimitPer`] from its required fields.
-    pub fn new(attributes: impl IntoIterator<Item = impl Into<String>>, limit: i64) -> Self {
+    pub fn new(attributes: impl IntoIterator<Item = impl Into<String>>, limit: u64) -> Self {
         Self {
             attributes: attributes.into_iter().map(Into::into).collect(),
             limit,
@@ -3143,9 +3069,9 @@ pub struct NamespaceHintCacheWarmResponse {
 #[non_exhaustive]
 pub struct NamespaceMetadata {
     /// The approximate number of logical bytes in the namespace.
-    pub approx_logical_bytes: i64,
+    pub approx_logical_bytes: u64,
     /// The approximate number of rows in the namespace.
-    pub approx_row_count: i64,
+    pub approx_row_count: u64,
     /// The timestamp when the namespace was created.
     pub created_at: DateTime<Utc>,
     /// The encryption configuration for a namespace.
@@ -3153,7 +3079,7 @@ pub struct NamespaceMetadata {
     /// The state of the namespace's index.
     pub index: NamespaceMetadataIndex,
     /// The schema of the namespace.
-    pub schema: HashMap<String, AttributeSchemaConfig>,
+    pub schema: BTreeMap<String, AttributeSchemaConfig>,
     /// The timestamp when the namespace was last modified by a write operation.
     pub updated_at: DateTime<Utc>,
     /// Configuration for namespace pinning, along with the current status of the pinned namespace.
@@ -3199,9 +3125,9 @@ impl From<NamespaceMetadataIndexUpdating> for NamespaceMetadataIndex {
 pub struct NamespaceMetadataIndexUpdating {
     /// The number of bytes in the namespace that are in the write-ahead log but have not yet been
     /// indexed.
-    pub unindexed_bytes: i64,
+    pub unindexed_bytes: u64,
     /// The number of rows in the write-ahead log that have not yet been indexed.
-    pub unindexed_rows: i64,
+    pub unindexed_rows: u64,
 }
 
 /// Detailed configuration for an attribute attached to a document.
@@ -3429,7 +3355,7 @@ pub struct AttributeEmbedConfig {
     /// storing embeddings in an existing attribute, this can be omitted, and may not be set to a
     /// value other than the dimensions of that attribute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dims: Option<i64>,
+    pub dims: Option<u64>,
 }
 
 impl AttributeEmbedConfig {
@@ -3452,7 +3378,7 @@ impl AttributeEmbedConfig {
     /// The dimensionality to embed at. If not set, will pick the default for this model. If you're
     /// storing embeddings in an existing attribute, this can be omitted, and may not be set to a value
     /// other than the dimensions of that attribute.
-    pub fn dims(mut self, dims: i64) -> Self {
+    pub fn dims(mut self, dims: u64) -> Self {
         self.dims = Some(dims);
         self
     }
@@ -3509,7 +3435,7 @@ pub struct FullTextSearchConfig {
     /// Maximum length of a token in bytes. Tokens larger than this value during tokenization will
     /// be filtered out. Has to be between `1` and `254` (inclusive). Defaults to `39`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_token_length: Option<i64>,
+    pub max_token_length: Option<u64>,
     /// Removes common words from the text based on language. Defaults to `true` (i.e. remove common
     /// words).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3561,7 +3487,7 @@ impl FullTextSearchConfig {
 
     /// Maximum length of a token in bytes. Tokens larger than this value during tokenization will be
     /// filtered out. Has to be between `1` and `254` (inclusive). Defaults to `39`.
-    pub fn max_token_length(mut self, max_token_length: i64) -> Self {
+    pub fn max_token_length(mut self, max_token_length: u64) -> Self {
         self.max_token_length = Some(max_token_length);
         self
     }
@@ -3868,11 +3794,11 @@ pub struct PinningConfigResponse {
 #[non_exhaustive]
 pub struct PinningStatus {
     /// The number of replicas that are warm and serving traffic.
-    pub ready_replicas: i64,
+    pub ready_replicas: u64,
     /// The number of running replicas for the namespace. Replicas are billed once running, even
     /// before they finish warming their caches and become ready to serve traffic. This count is
     /// updated independently and may briefly disagree with the other status fields.
-    pub replicas: i64,
+    pub replicas: u64,
     /// The timestamp of the latest pinning status snapshot.
     pub updated_at: DateTime<Utc>,
     /// Aggregate utilization for the pinned namespace, reported as a value between 0.0 and 1.0.
@@ -3903,11 +3829,11 @@ impl ShardingConfig {
 pub struct Query {
     /// Aggregations to compute over all documents in the namespace that match the filters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub aggregate_by: Option<HashMap<String, AggregateBy>>,
+    pub aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     /// Computes additional values on documents returned by a query. Each key is the name of the
     /// computed attribute; each value is an expression describing how to compute it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compute_attributes: Option<HashMap<String, Expr>>,
+    pub compute_attributes: Option<BTreeMap<String, Expr>>,
     /// A function used to calculate vector similarity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance_metric: Option<DistanceMetric>,
@@ -3938,7 +3864,7 @@ pub struct Query {
     pub rank_by: Option<RankBy>,
     /// The number of results to return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<i64>,
+    pub top_k: Option<u64>,
 }
 
 impl Query {
@@ -4031,7 +3957,7 @@ impl Query {
     }
 
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.top_k = Some(top_k);
         self
     }
@@ -4044,26 +3970,14 @@ impl Query {
 #[allow(clippy::large_enum_variant)]
 pub enum MultiQueryLimit {
     /// Limits the total number of reranked documents returned.
-    Int(i64),
+    Int(u64),
     /// Limits the total number of reranked documents returned.
     RerankLimit(RerankLimit),
 }
 
-impl From<i64> for MultiQueryLimit {
-    fn from(value: i64) -> Self {
+impl From<u64> for MultiQueryLimit {
+    fn from(value: u64) -> Self {
         Self::Int(value)
-    }
-}
-
-impl From<i32> for MultiQueryLimit {
-    fn from(value: i32) -> Self {
-        Self::Int(value.into())
-    }
-}
-
-impl From<u32> for MultiQueryLimit {
-    fn from(value: u32) -> Self {
-        Self::Int(value.into())
     }
 }
 
@@ -4078,12 +3992,12 @@ impl From<RerankLimit> for MultiQueryLimit {
 #[non_exhaustive]
 pub struct RerankLimit {
     /// Limits the total number of documents returned after reranking.
-    pub total: i64,
+    pub total: u64,
 }
 
 impl RerankLimit {
     /// Creates a new [`RerankLimit`] from its required fields.
-    pub fn new(total: i64) -> Self {
+    pub fn new(total: u64) -> Self {
         Self { total }
     }
 }
@@ -4172,7 +4086,7 @@ impl From<RerankBy> for Value {
 pub struct RrfParams {
     /// RRF rank constant (`k`). Must be greater than zero. Defaults to `60`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rank_constant: Option<i64>,
+    pub rank_constant: Option<u64>,
     /// A positive weight for each subquery, in the same order as `queries`. The number of weights
     /// must match the number of subqueries. When omitted, every subquery has a weight of `1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4186,7 +4100,7 @@ impl RrfParams {
     }
 
     /// RRF rank constant (`k`). Must be greater than zero. Defaults to `60`.
-    pub fn rank_constant(mut self, rank_constant: i64) -> Self {
+    pub fn rank_constant(mut self, rank_constant: u64) -> Self {
         self.rank_constant = Some(rank_constant);
         self
     }
@@ -4250,25 +4164,25 @@ pub struct MultiQueryResult {
 #[non_exhaustive]
 pub struct QueryPerformance {
     /// the approximate number of documents in the namespace.
-    pub approx_namespace_size: i64,
+    pub approx_namespace_size: u64,
     /// The ratio of cache hits to total cache lookups.
     pub cache_hit_ratio: f64,
     /// A qualitative description of the cache hit ratio (`hot`, `warm`, or `cold`).
     pub cache_temperature: String,
     /// The number of unindexed documents processed by the query.
-    pub exhaustive_search_count: i64,
+    pub exhaustive_search_count: u64,
     /// Request time measured on the server, excluding time spent waiting due to the namespace
     /// concurrency limit.
-    pub query_execution_ms: i64,
+    pub query_execution_ms: u64,
     /// Request time measured on the server, including time spent waiting for other queries to
     /// complete if the namespace was at its concurrency limit.
-    pub server_total_ms: i64,
+    pub server_total_ms: u64,
     /// Time spent embedding text, in milliseconds. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_ms: Option<i64>,
+    pub embedding_ms: Option<u64>,
     /// The number of tokens embedded. Only set when using a native embedding model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_tokens: Option<i64>,
+    pub embedding_tokens: Option<u64>,
 }
 
 /// The result of a query, or of one subquery of a multi-query. With `aggregate_by`, `aggregations`
@@ -4279,8 +4193,8 @@ pub struct QueryPerformance {
 pub struct SingleQueryResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregation_groups: Vec<AggregationGroup>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub aggregations: HashMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aggregations: BTreeMap<String, Value>,
     /// The documents that matched the query, ordered by `rank_by`. Only present when `rank_by` is
     /// set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -4288,7 +4202,7 @@ pub struct SingleQueryResult {
 }
 
 /// A single aggregation group.
-pub type AggregationGroup = HashMap<String, Value>;
+pub type AggregationGroup = BTreeMap<String, Value>;
 
 /// A single document, in a row-based format.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4301,7 +4215,7 @@ pub struct Row {
     pub vector: Option<Vector>,
     /// Properties not covered by the fields above.
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    pub extra: BTreeMap<String, Value>,
 }
 
 impl Row {
@@ -4475,7 +4389,7 @@ pub struct OperationError {
     /// The response to an unsuccessful request.
     pub detail: ErrorResponse,
     /// The HTTP status code of the operation's error.
-    pub status_code: i64,
+    pub status_code: u64,
 }
 
 /// The response to an unsuccessful request.
@@ -4498,8 +4412,8 @@ pub struct QueryResult {
     pub performance: QueryPerformance,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aggregation_groups: Vec<AggregationGroup>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub aggregations: HashMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aggregations: BTreeMap<String, Value>,
     /// The documents that matched the query, ordered by `rank_by`. Only present when `rank_by` is
     /// set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -4536,7 +4450,7 @@ pub struct NamespaceRecallResponseGroundTruth {
 }
 
 /// The response to a successful namespace schema request.
-pub type NamespaceSchemaResponse = HashMap<String, AttributeSchemaConfig>;
+pub type NamespaceSchemaResponse = BTreeMap<String, AttributeSchemaConfig>;
 
 /// The response to a successful request to start a copy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4656,7 +4570,7 @@ impl AttributeSchemaDrop {
 }
 
 /// The updated schema for the namespace.
-pub type NamespaceUpdateSchemaResponse = HashMap<String, AttributeSchemaConfig>;
+pub type NamespaceUpdateSchemaResponse = BTreeMap<String, AttributeSchemaConfig>;
 
 /// The namespace to create an instant, copy-on-write clone of.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4778,7 +4692,7 @@ impl CopyFromNamespaceConfig {
 pub struct PatchByFilter {
     /// Filter by attributes. Same syntax as the query endpoint.
     pub filters: Filter,
-    pub patch: HashMap<String, Value>,
+    pub patch: BTreeMap<String, Value>,
 }
 
 impl PatchByFilter {
@@ -4809,7 +4723,7 @@ pub struct Columns {
     pub vector: Option<ColumnsVector>,
     /// Properties not covered by the fields above.
     #[serde(flatten)]
-    pub extra: HashMap<String, Vec<Value>>,
+    pub extra: BTreeMap<String, Vec<Value>>,
 }
 
 impl Columns {
@@ -5003,11 +4917,11 @@ mod tests {
                 json!(["string", "ANN", [0.5]]),
             ),
             (
-                RankBy::ann_multi("string", [vec![0.5]]),
+                RankBy::ann("string", [vec![0.5]]),
                 json!(["string", "ANN", [[0.5]]]),
             ),
             (
-                RankBy::ann_expr("string", Expr::embed("string")),
+                RankBy::ann("string", Expr::embed("string")),
                 json!(["string", "ANN", ["Embed", "string"]]),
             ),
             (
@@ -5015,11 +4929,11 @@ mod tests {
                 json!(["string", "kNN", [0.5]]),
             ),
             (
-                RankBy::knn_multi("string", [vec![0.5]]),
+                RankBy::knn("string", [vec![0.5]]),
                 json!(["string", "kNN", [[0.5]]]),
             ),
             (
-                RankBy::knn_expr("string", Expr::embed("string")),
+                RankBy::knn("string", Expr::embed("string")),
                 json!(["string", "kNN", ["Embed", "string"]]),
             ),
             (
@@ -5056,7 +4970,7 @@ mod tests {
                 json!(["string", "BM25", "string"]),
             ),
             (
-                RankByText::bm25_array("string", ["string"]),
+                RankByText::bm25("string", ["string"]),
                 json!(["string", "BM25", ["string"]]),
             ),
             (
@@ -5064,7 +4978,7 @@ mod tests {
                 json!(["string", "BM25", "string", {}]),
             ),
             (
-                RankByText::bm25_array_with_params("string", ["string"], Bm25ClauseParams::new()),
+                RankByText::bm25_with_params("string", ["string"], Bm25ClauseParams::new()),
                 json!(["string", "BM25", ["string"], {}]),
             ),
             (
@@ -5209,7 +5123,7 @@ mod tests {
                 json!(["string", "ContainsAllTokens", "string"]),
             ),
             (
-                Filter::contains_all_tokens_array("string", ["string"]),
+                Filter::contains_all_tokens("string", ["string"]),
                 json!(["string", "ContainsAllTokens", ["string"]]),
             ),
             (
@@ -5221,7 +5135,7 @@ mod tests {
                 json!(["string", "ContainsAllTokens", "string", {}]),
             ),
             (
-                Filter::contains_all_tokens_array_with_params(
+                Filter::contains_all_tokens_with_params(
                     "string",
                     ["string"],
                     ContainsAllTokensFilterParams::new(),
@@ -5233,7 +5147,7 @@ mod tests {
                 json!(["string", "ContainsAnyToken", "string"]),
             ),
             (
-                Filter::contains_any_token_array("string", ["string"]),
+                Filter::contains_any_token("string", ["string"]),
                 json!(["string", "ContainsAnyToken", ["string"]]),
             ),
             (
@@ -5245,7 +5159,7 @@ mod tests {
                 json!(["string", "ContainsAnyToken", "string", {}]),
             ),
             (
-                Filter::contains_any_token_array_with_params(
+                Filter::contains_any_token_with_params(
                     "string",
                     ["string"],
                     ContainsAnyTokenFilterParams::new(),
@@ -5257,7 +5171,7 @@ mod tests {
                 json!(["string", "ContainsTokenSequence", "string"]),
             ),
             (
-                Filter::contains_token_sequence_array("string", ["string"]),
+                Filter::contains_token_sequence("string", ["string"]),
                 json!(["string", "ContainsTokenSequence", ["string"]]),
             ),
             (
