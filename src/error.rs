@@ -37,6 +37,13 @@ pub enum Error {
     #[error("failed to encode request body: {0}")]
     Encode(#[source] serde_json::Error),
 
+    /// A value couldn't be converted to or from JSON, e.g. by a type's `from_serializable` or `deserialize_as`.
+    ///
+    /// Converts from [`serde_json::Error`], so those conversions can use `?` in functions that return
+    /// [`Result`].
+    #[error("failed to convert to or from JSON: {0}")]
+    Json(#[from] serde_json::Error),
+
     /// The client is misconfigured, e.g. because it's missing an API key.
     #[error("invalid client configuration: {0}")]
     Config(String),
@@ -197,6 +204,19 @@ mod tests {
             assert_eq!(err.message, "something went wrong");
             assert_eq!(err.to_string(), "400 Bad Request: something went wrong");
         }
+    }
+
+    #[test]
+    fn converts_json_errors() {
+        fn parse(text: &str) -> Result<Value> {
+            Ok(serde_json::from_str(text)?)
+        }
+        let err = parse("{").unwrap_err();
+        assert!(matches!(err, Error::Json(_)));
+        assert!(
+            err.to_string()
+                .starts_with("failed to convert to or from JSON: ")
+        );
     }
 
     #[tokio::test]

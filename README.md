@@ -155,7 +155,7 @@ async fn main() -> Result<(), turbopuffer::Error> {
 
 ## Handling errors
 
-Methods return [`turbopuffer::Result`](https://docs.rs/turbopuffer/latest/turbopuffer/type.Result.html). When the API responds with a non-success status code, the error is `Error::Api`, with the status code, message, and response body. Other variants cover timeouts, connection errors, and responses that couldn't be decoded.
+Methods return [`turbopuffer::Result`](https://docs.rs/turbopuffer/latest/turbopuffer/type.Result.html). When the API responds with a non-success status code, the error is `Error::Api`, with the status code, message, and response body. Other variants cover timeouts, connection errors, responses that couldn't be decoded, and `Error::Json` for your own conversions to or from JSON, which `serde_json::Error` converts into with `?`.
 
 ```rust no_run
 use turbopuffer::ApiErrorKind;

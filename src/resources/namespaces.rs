@@ -1,7 +1,7 @@
 //! Operations on a single namespace, through the [`Namespace`] handle returned by
 //! [`Client::namespace`].
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::time::Duration;
@@ -19,8 +19,8 @@ use crate::types::{
     NamespaceExplainQueryResponse, NamespaceHintCacheWarmResponse, NamespaceMetadata,
     NamespaceMetadataPatchPinning, NamespaceRecallResponse, NamespaceSchemaResponse,
     NamespaceStartCopyFromResponse, NamespaceUpdateSchemaResponse, PatchByFilter, Query,
-    QueryConfigConsistency, QueryLimit, QueryResult, RankBy, RerankBy, RerankModelParams, Row,
-    ShardingConfig, VectorEncoding, WriteResult,
+    QueryConfigConsistency, QueryEffort, QueryLimit, QueryResult, RankBy, RerankBy,
+    RerankModelParams, Row, ShardingConfig, VectorEncoding, WriteResult,
 };
 
 /// A handle to a single namespace, returned by [`Client::namespace`].
@@ -240,7 +240,7 @@ impl BranchFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&HashMap::from([("branch_from_namespace", &self.body)]))?
+            .json(&BTreeMap::from([("branch_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -339,7 +339,7 @@ impl CopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
-            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
+            .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -437,13 +437,15 @@ pub struct ExplainQueryRequest {
 #[derive(Debug, Clone, Default, Serialize)]
 struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    aggregate_by: Option<HashMap<String, AggregateBy>>,
+    aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_attributes: Option<HashMap<String, Expr>>,
+    compute_attributes: Option<BTreeMap<String, Expr>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
     distance_metric: Option<DistanceMetric>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<QueryEffort>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exclude_attributes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -459,9 +461,7 @@ struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    search_effort: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
 }
@@ -517,6 +517,12 @@ impl ExplainQueryRequest {
         self
     }
 
+    /// How much work an ANN query does compared to the default. Only supported for ANN queries.
+    pub fn effort(mut self, effort: impl Into<QueryEffort>) -> Self {
+        self.body.effort = Some(effort.into());
+        self
+    }
+
     /// List of attribute names to exclude from the response. All other attributes will be included in
     /// the response.
     pub fn exclude_attributes(
@@ -566,15 +572,8 @@ impl ExplainQueryRequest {
         self
     }
 
-    /// Multiplies the number of clusters searched by an ANN query. Higher values improve recall at the
-    /// cost of latency. Queried bytes are billed proportionally. Between 0.01 and 100, defaults to 1.
-    pub fn search_effort(mut self, search_effort: f64) -> Self {
-        self.body.search_effort = Some(search_effort);
-        self
-    }
-
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -961,13 +960,15 @@ pub struct QueryRequest {
 #[derive(Debug, Clone, Default, Serialize)]
 struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    aggregate_by: Option<HashMap<String, AggregateBy>>,
+    aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_attributes: Option<HashMap<String, Expr>>,
+    compute_attributes: Option<BTreeMap<String, Expr>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
     distance_metric: Option<DistanceMetric>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<QueryEffort>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exclude_attributes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -985,9 +986,7 @@ struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     rerank_by: Option<RerankModelParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    search_effort: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector_encoding: Option<VectorEncoding>,
 }
@@ -1040,6 +1039,12 @@ impl QueryRequest {
     /// A function used to calculate vector similarity.
     pub fn distance_metric(mut self, distance_metric: impl Into<DistanceMetric>) -> Self {
         self.body.distance_metric = Some(distance_metric.into());
+        self
+    }
+
+    /// How much work an ANN query does compared to the default. Only supported for ANN queries.
+    pub fn effort(mut self, effort: impl Into<QueryEffort>) -> Self {
+        self.body.effort = Some(effort.into());
         self
     }
 
@@ -1098,15 +1103,8 @@ impl QueryRequest {
         self
     }
 
-    /// Multiplies the number of clusters searched by an ANN query. Higher values improve recall at the
-    /// cost of latency. Queried bytes are billed proportionally. Between 0.01 and 100, defaults to 1.
-    pub fn search_effort(mut self, search_effort: f64) -> Self {
-        self.body.search_effort = Some(search_effort);
-        self
-    }
-
     /// The number of results to return.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -1182,11 +1180,11 @@ struct RecallBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     include_ground_truth: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    num: Option<i64>,
+    num: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i64>,
+    top_k: Option<u64>,
 }
 
 impl RecallRequest {
@@ -1212,7 +1210,7 @@ impl RecallRequest {
     }
 
     /// The number of searches to run.
-    pub fn num(mut self, num: i64) -> Self {
+    pub fn num(mut self, num: u64) -> Self {
         self.body.num = Some(num);
         self
     }
@@ -1224,7 +1222,7 @@ impl RecallRequest {
     }
 
     /// Search for `top_k` nearest neighbors.
-    pub fn top_k(mut self, top_k: i64) -> Self {
+    pub fn top_k(mut self, top_k: u64) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
@@ -1419,7 +1417,7 @@ impl StartCopyFromRequest {
             encode_path_segment(&self.namespace)
         );
         let request = ApiRequest::new(Method::POST, path)
-            .json(&HashMap::from([("copy_from_namespace", &self.body)]))?
+            .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
             .options(self.options);
         Ok((self.client, request))
     }
@@ -1540,7 +1538,7 @@ impl IntoFuture for UpdateMetadataRequest {
 pub struct UpdateSchemaRequest {
     client: Client,
     namespace: String,
-    body: HashMap<String, AttributeSchema>,
+    body: BTreeMap<String, AttributeSchema>,
     options: RequestOptions,
 }
 
@@ -1548,7 +1546,7 @@ impl UpdateSchemaRequest {
     pub(crate) fn new(
         client: Client,
         namespace: String,
-        schema: HashMap<String, AttributeSchema>,
+        schema: BTreeMap<String, AttributeSchema>,
     ) -> Self {
         Self {
             client,
@@ -1651,7 +1649,7 @@ struct WriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     return_affected_ids: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    schema: Option<HashMap<String, AttributeSchema>>,
+    schema: Option<BTreeMap<String, AttributeSchema>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sharding: Option<ShardingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1745,7 +1743,7 @@ impl WriteRequest {
         self
     }
 
-    /// The patch and filter specifying which documents to patch.
+    /// Sets the attributes in `patch` on every document that matches `filters`.
     pub fn patch_by_filter(mut self, patch_by_filter: impl Into<PatchByFilter>) -> Self {
         self.body.patch_by_filter = Some(patch_by_filter.into());
         self
