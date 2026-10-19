@@ -4,6 +4,7 @@
 
 mod client;
 mod error;
+mod observer;
 pub mod pagination;
 pub mod resources;
 mod transport;

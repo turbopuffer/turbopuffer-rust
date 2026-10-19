@@ -1,8 +1,10 @@
 //! Request execution: building HTTP requests, retrying failures, and decoding responses.
 
+use std::any::Any;
+use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
@@ -12,6 +14,7 @@ use serde::de::DeserializeOwned;
 
 use crate::client::Client;
 use crate::error::{ApiError, Error, Result};
+use crate::observer::{Observation, RequestInfo};
 
 /// The longest `Retry-After` the client will honor. Longer values fall back to exponential backoff.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -29,9 +32,14 @@ pub(crate) struct RequestOptions {
 pub(crate) struct ApiRequest {
     method: Method,
     path: String,
+    /// The spec path's `stainless_overload`, which lets request observers tell overloads of a path apart. It isn't
+    /// sent.
+    overload: Option<&'static str>,
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
     body: Option<Bytes>,
+    /// When the body was serialized, for request observers.
+    serialized: Option<(Instant, Instant)>,
     options: RequestOptions,
 }
 
@@ -40,17 +48,27 @@ impl ApiRequest {
         Self {
             method,
             path,
+            overload: None,
             query: Vec::new(),
             headers: Vec::new(),
             body: None,
+            serialized: None,
             options: RequestOptions::default(),
         }
     }
 
     #[allow(dead_code)]
     pub(crate) fn json<T: Serialize + ?Sized>(mut self, body: &T) -> Result<Self> {
+        let start = Instant::now();
         self.body = Some(serde_json::to_vec(body).map_err(Error::Encode)?.into());
+        self.serialized = Some((start, Instant::now()));
         Ok(self)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn overload(mut self, overload: &'static str) -> Self {
+        self.overload = Some(overload);
+        self
     }
 
     #[allow(dead_code)]
@@ -76,29 +94,134 @@ impl ApiRequest {
         self.query.retain(|(key, _)| key != name);
         self.query.push((name.to_owned(), value));
     }
+
+    /// Forgets when the body was serialized, for a copy of the request that's sent later.
+    #[allow(dead_code)]
+    pub(crate) fn forget_serialization(&mut self) {
+        self.serialized = None;
+    }
+
+    /// The URL request observers see: the path with its overload, without query params.
+    fn observed_url(&self) -> Cow<'_, str> {
+        match self.overload {
+            Some(overload) => {
+                let separator = if self.path.contains('?') { '&' } else { '?' };
+                Cow::Owned(format!(
+                    "{}{separator}stainless_overload={overload}",
+                    self.path
+                ))
+            }
+            None => Cow::Borrowed(&self.path),
+        }
+    }
 }
 
 impl Client {
     /// Sends a request and decodes its JSON response body.
-    pub(crate) async fn execute<T: DeserializeOwned>(&self, request: ApiRequest) -> Result<T> {
-        let bytes = self.execute_bytes(request).await?;
-        decode(&bytes)
+    pub(crate) async fn execute<T: DeserializeOwned + 'static>(
+        &self,
+        request: ApiRequest,
+    ) -> Result<T> {
+        let mut observation = self.observe(&request);
+        let result = self
+            .send_and_parse(&request, &mut observation, decode::<T>)
+            .await;
+        match &result {
+            Ok(value) => observation.finish(Some(value as &dyn Any), None),
+            Err(err) => observation.finish(None, Some(err)),
+        }
+        result
+    }
+
+    /// Sends a request and parses its response body with `parse`.
+    #[allow(dead_code)]
+    pub(crate) async fn execute_with<T>(
+        &self,
+        request: ApiRequest,
+        parse: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        let mut observation = self.observe(&request);
+        let result = self.send_and_parse(&request, &mut observation, parse).await;
+        observation.finish(None, result.as_ref().err());
+        result
     }
 
     /// Sends a request and returns its raw response body.
+    #[allow(dead_code)]
     pub(crate) async fn execute_bytes(&self, request: ApiRequest) -> Result<Bytes> {
-        let response = self.send_with_retries(&request).await?;
-        response.bytes().await.map_err(Error::from_reqwest)
+        let mut observation = self.observe(&request);
+        let result = self.send_and_read(&request, &mut observation).await;
+        match &result {
+            Ok(bytes) => observation.finish(Some(bytes as &dyn Any), None),
+            Err(err) => observation.finish(None, Some(err)),
+        }
+        result
     }
 
     /// Sends a request, ignoring any response body.
     #[allow(dead_code)]
     pub(crate) async fn execute_empty(&self, request: ApiRequest) -> Result<()> {
-        self.send_with_retries(&request).await?;
-        Ok(())
+        let mut observation = self.observe(&request);
+        let result = self
+            .send_with_retries(&request, &mut observation)
+            .await
+            .map(drop);
+        match &result {
+            Ok(()) => observation.finish(Some(&() as &dyn Any), None),
+            Err(err) => observation.finish(None, Some(err)),
+        }
+        result
     }
 
-    async fn send_with_retries(&self, request: &ApiRequest) -> Result<Response> {
+    /// Starts observing a request, if the client has an observer.
+    pub(crate) fn observe(&self, request: &ApiRequest) -> Observation {
+        let Some(observer) = &self.inner.observer else {
+            return Observation::inert();
+        };
+        let url = request.observed_url();
+        let info = RequestInfo {
+            method: &request.method,
+            url: &url,
+        };
+        Observation::start(
+            observer.as_ref(),
+            self.inner.trace_connections,
+            &info,
+            request.serialized,
+        )
+    }
+
+    async fn send_and_parse<T>(
+        &self,
+        request: &ApiRequest,
+        observation: &mut Observation,
+        parse: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        let bytes = self.send_and_read(request, observation).await?;
+        observation.deserialize_begin();
+        parse(&bytes)
+    }
+
+    async fn send_and_read(
+        &self,
+        request: &ApiRequest,
+        observation: &mut Observation,
+    ) -> Result<Bytes> {
+        let response = self.send_with_retries(request, observation).await?;
+        match response.bytes().await {
+            Ok(bytes) => {
+                observation.body_end();
+                Ok(bytes)
+            }
+            Err(err) => Err(observation.body_failed(err)),
+        }
+    }
+
+    async fn send_with_retries(
+        &self,
+        request: &ApiRequest,
+        observation: &mut Observation,
+    ) -> Result<Response> {
         let inner = &self.inner;
         let max_retries = request.options.max_retries.unwrap_or(inner.max_retries);
         let timeout = request.options.timeout.unwrap_or(inner.timeout);
@@ -106,25 +229,41 @@ impl Client {
 
         let mut attempt = 0;
         loop {
-            let result = self
+            observation.start_attempt(attempt);
+            let result = match self
                 .request_builder(request, url.clone(), attempt, timeout)
-                .send()
-                .await;
+                .build()
+            {
+                Ok(mut http_request) => {
+                    match observation.attempt_begin(&mut http_request, request.body.as_ref()) {
+                        Some(trace) => {
+                            crate::observer::traced(trace, inner.http.execute(http_request)).await
+                        }
+                        None => inner.http.execute(http_request).await,
+                    }
+                }
+                Err(err) => Err(err),
+            };
             let retry_after = match result {
-                Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => {
+                    observation.attempt_response(&response);
+                    if response.status().is_success() {
+                        return Ok(response);
+                    }
                     if attempt >= max_retries
                         || !should_retry(response.status(), response.headers())
                     {
-                        return Err(ApiError::from_response(response).await.into());
+                        let err = ApiError::from_response(response).await;
+                        observation.body_end();
+                        return Err(err.into());
                     }
                     retry_after(response.headers())
                 }
                 Err(err) => {
-                    if attempt >= max_retries
-                        || !(err.is_timeout() || err.is_connect() || err.is_request())
-                    {
-                        return Err(Error::from_reqwest(err));
+                    let retryable = err.is_timeout() || err.is_connect() || err.is_request();
+                    let err = observation.attempt_failed(err);
+                    if attempt >= max_retries || !retryable {
+                        return Err(err);
                     }
                     None
                 }

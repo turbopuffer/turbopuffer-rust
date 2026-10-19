@@ -7,6 +7,7 @@ use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::error::{Error, Result};
+use crate::observer::RequestObserver;
 
 /// The `production` environment's base URL.
 const PRODUCTION_URL: &str = "https://{region}.turbopuffer.com";
@@ -34,6 +35,9 @@ pub(crate) struct ClientInner {
     pub(crate) max_retries: u32,
     pub(crate) initial_retry_delay: Duration,
     pub(crate) max_retry_delay: Duration,
+    pub(crate) observer: Option<Arc<dyn RequestObserver>>,
+    /// Whether the client's connector traces connections for the observer.
+    pub(crate) trace_connections: bool,
 }
 
 impl Client {
@@ -71,8 +75,24 @@ impl Client {
                 max_retries: 2,
                 initial_retry_delay: Duration::from_millis(1),
                 max_retry_delay: Duration::from_millis(5),
+                observer: None,
+                trace_connections: false,
             }),
         }
+    }
+
+    /// Like [`for_tests`](Self::for_tests), with an observer that's traced like a built client's.
+    #[cfg(test)]
+    pub(crate) fn for_tests_observed(base_url: &str, observer: Arc<dyn RequestObserver>) -> Self {
+        let mut client = Self::for_tests(base_url);
+        let inner = Arc::get_mut(&mut client.inner).expect("the client isn't shared yet");
+        inner.http = reqwest::Client::builder()
+            .connector_layer(crate::observer::ConnectLayer)
+            .build()
+            .unwrap();
+        inner.observer = Some(observer);
+        inner.trace_connections = true;
+        client
     }
 }
 
@@ -98,6 +118,7 @@ pub struct ClientBuilder {
     max_retries: Option<u32>,
     headers: Vec<(String, String)>,
     http_client: Option<reqwest::Client>,
+    observer: Option<Arc<dyn RequestObserver>>,
 }
 
 impl ClientBuilder {
@@ -154,6 +175,13 @@ impl ClientBuilder {
         self
     }
 
+    /// Observes the client's requests, such as to record their timings.
+    #[allow(dead_code)]
+    pub(crate) fn request_observer(mut self, observer: Arc<dyn RequestObserver>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
     /// Creates the client.
     ///
     /// Fails if a required setting is missing or invalid.
@@ -196,11 +224,20 @@ impl ClientBuilder {
             headers.insert(name, header_value(value)?);
         }
 
+        let observer = self.observer;
+        // Connections can only be traced by the client's own connector.
+        let trace_connections = observer.is_some() && self.http_client.is_none();
         let http = match self.http_client {
             Some(http) => http,
-            None => reqwest::Client::builder()
-                .build()
-                .map_err(|err| Error::Config(format!("failed to create HTTP client: {err}")))?,
+            None => {
+                let mut builder = reqwest::Client::builder();
+                if trace_connections {
+                    builder = builder.connector_layer(crate::observer::ConnectLayer);
+                }
+                builder
+                    .build()
+                    .map_err(|err| Error::Config(format!("failed to create HTTP client: {err}")))?
+            }
         };
 
         Ok(Client {
@@ -213,6 +250,8 @@ impl ClientBuilder {
                 max_retries: self.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
                 initial_retry_delay: INITIAL_RETRY_DELAY,
                 max_retry_delay: MAX_RETRY_DELAY,
+                observer,
+                trace_connections,
             }),
         })
     }
@@ -285,6 +324,7 @@ fn sensitive_header(value: String) -> Result<HeaderValue> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use reqwest::Method;
@@ -293,6 +333,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::observer::{RequestInfo, RequestScope};
     use crate::transport::ApiRequest;
 
     /// A builder with every required setting.
@@ -498,5 +539,50 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.is_timeout(), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn installs_request_observers() {
+        struct Counter(AtomicUsize);
+        impl RequestObserver for Counter {
+            fn start(&self, _info: &RequestInfo<'_>) -> Option<Box<dyn RequestScope>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                None
+            }
+        }
+
+        let server = MockServer::start().await;
+        Mock::given(path("/thing"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .mount(&server)
+            .await;
+        let observer = Arc::new(Counter(AtomicUsize::new(0)));
+        let client = build(
+            builder()
+                .base_url(server.uri())
+                .request_observer(observer.clone()),
+            &[],
+        )
+        .unwrap();
+        assert!(client.inner.trace_connections);
+        client
+            .execute::<Value>(ApiRequest::new(Method::GET, "/thing".to_owned()))
+            .await
+            .unwrap();
+        assert_eq!(observer.0.load(Ordering::SeqCst), 1);
+
+        // Connections can't be traced through an HTTP client the client doesn't own.
+        let builder = builder().base_url(server.uri());
+        let client = build(
+            builder
+                .clone()
+                .request_observer(observer)
+                .http_client(reqwest::Client::new()),
+            &[],
+        )
+        .unwrap();
+        assert!(client.inner.observer.is_some() && !client.inner.trace_connections);
+        let client = build(builder, &[]).unwrap();
+        assert!(client.inner.observer.is_none() && !client.inner.trace_connections);
     }
 }

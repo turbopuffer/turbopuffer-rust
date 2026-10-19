@@ -113,6 +113,8 @@ impl<T> CursorPage<T> {
         fetcher
             .request
             .set_query_param(fetcher.cursor_param, cursor);
+        // The next page's request reuses the body serialized for the first one.
+        fetcher.request.forget_serialization();
         Some(fetcher)
     }
 
@@ -127,11 +129,16 @@ impl<T> CursorPage<T> {
 
 impl<T> PageFetcher<T> {
     async fn fetch(self) -> Result<CursorPage<T>> {
-        let bytes = self.client.execute_bytes(self.request.clone()).await?;
-        let (items, next_cursor) = (self.parse)(&bytes).map_err(|source| Error::Decode {
-            source,
-            body: String::from_utf8_lossy(&bytes).into_owned(),
-        })?;
+        let parse = self.parse;
+        let (items, next_cursor) = self
+            .client
+            .execute_with(self.request.clone(), |bytes| {
+                parse(bytes).map_err(|source| Error::Decode {
+                    source,
+                    body: String::from_utf8_lossy(bytes).into_owned(),
+                })
+            })
+            .await?;
         Ok(CursorPage {
             items,
             next_cursor,
