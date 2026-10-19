@@ -13,6 +13,8 @@ use serde::de::DeserializeOwned;
 use crate::client::Client;
 use crate::error::{ApiError, Error, Result};
 
+mod respond_async;
+
 /// The longest `Retry-After` the client will honor. Longer values fall back to exponential backoff.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 
@@ -88,7 +90,7 @@ impl Client {
     /// Sends a request and returns its raw response body.
     pub(crate) async fn execute_bytes(&self, request: ApiRequest) -> Result<Bytes> {
         let response = self.send_with_retries(&request).await?;
-        response.bytes().await.map_err(Error::from_reqwest)
+        self.response_body(&request, response).await
     }
 
     /// Sends a request, ignoring any response body.
@@ -203,6 +205,10 @@ impl Client {
 pub(crate) fn default_headers(stainless_headers: bool) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    headers.insert(
+        respond_async::PREFER,
+        HeaderValue::from_static(respond_async::RESPOND_ASYNC),
+    );
     headers.insert(
         USER_AGENT,
         HeaderValue::from_static(concat!("Turbopuffer/Rust ", env!("CARGO_PKG_VERSION"))),
