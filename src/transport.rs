@@ -213,11 +213,7 @@ impl Client {
         self.response_body(request, response, observation).await
     }
 
-    async fn read_body(
-        &self,
-        response: Response,
-        observation: &mut Observation,
-    ) -> Result<Bytes> {
+    async fn read_body(&self, response: Response, observation: &mut Observation) -> Result<Bytes> {
         match response.bytes().await {
             Ok(bytes) => {
                 observation.body_end();

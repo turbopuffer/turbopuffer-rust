@@ -896,6 +896,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn observes_completed_async_operations() {
+        for fails in [false, true] {
+            let server = server_with(
+                ResponseTemplate::new(202)
+                    .insert_header("preference-applied", "respond-async")
+                    .insert_header("location", "/operation")
+                    .set_body_json(json!({ "token": "operation" })),
+            )
+            .await;
+            let outcome = if fails {
+                json!({ "error": { "status_code": 409, "detail": { "error": "conflict" } } })
+            } else {
+                json!({ "success": { "ok": true } })
+            };
+            Mock::given(path("/operation"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "status": "finished",
+                    "result": outcome,
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let (client, recorder) = observed(&server.uri());
+
+            let result = client.execute::<Value>(post("/thing")).await;
+            if fails {
+                assert_eq!(
+                    result.unwrap_err().status(),
+                    Some(reqwest::StatusCode::CONFLICT)
+                );
+            } else {
+                assert_eq!(result.unwrap(), json!({ "ok": true }));
+            }
+            assert_eq!(
+                recorder.events(),
+                [
+                    start("POST", "/thing"),
+                    Event::AttemptBegin(0),
+                    response_end(0, 202),
+                    Event::Finish {
+                        retries: 0,
+                        status: Some(202),
+                        error: fails,
+                        kind: None,
+                        parsed: !fails,
+                    },
+                ]
+            );
+            assert!(recorder.finished().body_end.is_some());
+        }
+    }
+
+    #[tokio::test]
     async fn observes_a_request() {
         let server = MockServer::start().await;
         Mock::given(path("/thing"))
