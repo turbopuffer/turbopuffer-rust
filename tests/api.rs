@@ -74,7 +74,7 @@ async fn namespaces_branch_from() {
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
         .and(body_json(json!({"branch_from_namespace":{"source_namespace":"string"}})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":9,"rows_patched":10,"rows_remaining":true,"rows_upserted":12,"upserted_ids":[3]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"status":"OK","deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":10,"rows_patched":11,"rows_remaining":true,"rows_upserted":13,"upserted_ids":[3]})))
         .mount(&server)
         .await;
 
@@ -96,7 +96,7 @@ async fn namespaces_copy_from() {
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
         .and(body_json(json!({"copy_from_namespace":{"source_namespace":"string","dest_encryption":{"mode":"customer-managed","key_name":"key_name"},"source_api_key":"string","source_region":"string"}})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":9,"rows_patched":10,"rows_remaining":true,"rows_upserted":12,"upserted_ids":[3]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"status":"OK","deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":10,"rows_patched":11,"rows_remaining":true,"rows_upserted":13,"upserted_ids":[3]})))
         .mount(&server)
         .await;
 
@@ -120,7 +120,7 @@ async fn namespaces_delete_all() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
         .and(path("/v2/namespaces/namespace"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status":"OK"})))
         .mount(&server)
         .await;
 
@@ -176,7 +176,10 @@ async fn namespaces_hint_cache_warm() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/namespaces/namespace/hint_cache_warm"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message":"message"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"status":"ACCEPTED","message":"message"})),
+        )
         .mount(&server)
         .await;
 
@@ -420,7 +423,7 @@ async fn namespaces_write() {
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
         .and(body_json(json!({"branch_from_namespace":"string","copy_from_namespace":"string","create_namespace":true,"delete_by_filter":["attr","Eq","value"],"delete_by_filter_allow_partial":true,"delete_condition":["attr","Eq","value"],"deletes":[3],"disable_backpressure":true,"distance_metric":"cosine_distance","encryption":{"mode":"customer-managed","key_name":"key_name"},"patch_by_filter":{"filters":["attr","Eq","value"],"patch":{"key":"value"}},"patch_by_filter_allow_partial":true,"patch_columns":{"id":[3]},"patch_condition":["attr","Eq","value"],"patch_rows":[{"id":3}],"return_affected_ids":true,"schema":{"key":"string"},"sharding":{"num_shards":3},"upsert_columns":{"id":[3]},"upsert_condition":["attr","Eq","value"],"upsert_rows":[{"id":3}]})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":9,"rows_patched":10,"rows_remaining":true,"rows_upserted":12,"upserted_ids":[3]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"status":"OK","deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":10,"rows_patched":11,"rows_remaining":true,"rows_upserted":13,"upserted_ids":[3]})))
         .mount(&server)
         .await;
 

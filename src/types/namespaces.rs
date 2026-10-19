@@ -20,6 +20,11 @@ pub struct WriteResult {
     pub message: String,
     /// The number of rows affected by the write request.
     pub rows_affected: u64,
+    /// The status of the request.
+    ///
+    /// Always `"OK"`.
+    #[serde(default)]
+    pub status: String,
     /// The IDs of documents that were deleted. Only included when `return_affected_ids` is true and
     /// at least one document was deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -196,9 +201,23 @@ impl From<&str> for EncryptionCustomerManaged {
 }
 
 /// The response to a successful namespace deletion request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct DeleteAllResponse {}
+pub struct DeleteAllResponse {
+    /// The status of the request.
+    ///
+    /// Always `"OK"`.
+    #[serde(default)]
+    pub status: String,
+}
+
+impl Default for DeleteAllResponse {
+    fn default() -> Self {
+        Self {
+            status: "OK".to_owned(),
+        }
+    }
+}
 
 /// An aggregate function to compute over all documents in the namespace.
 ///
@@ -390,6 +409,12 @@ impl From<ExprRefNew> for Expr {
 impl From<RankBy> for Expr {
     fn from(value: RankBy) -> Self {
         Self::Score(Box::new(value))
+    }
+}
+
+impl From<RankByText> for Expr {
+    fn from(value: RankByText) -> Self {
+        Self::Score(Box::new(RankBy::from(value)))
     }
 }
 
@@ -3250,12 +3275,26 @@ pub struct ExplainQueryResponse {
 }
 
 /// The response to a successful cache warm request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct HintCacheWarmResponse {
+    /// The status of the request.
+    ///
+    /// Always `"ACCEPTED"`.
+    #[serde(default)]
+    pub status: String,
     /// A message describing the result of the request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+impl Default for HintCacheWarmResponse {
+    fn default() -> Self {
+        Self {
+            status: "ACCEPTED".to_owned(),
+            message: Default::default(),
+        }
+    }
 }
 
 /// Metadata about a namespace.
@@ -4160,8 +4199,18 @@ impl Query {
     }
 
     /// Whether to include attributes in the response.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn include_attributes(mut self, include_attributes: impl Into<IncludeAttributes>) -> Self {
-        self.include_attributes = Some(include_attributes.into());
+        self.include_attributes = Some(
+            match (self.include_attributes.take(), include_attributes.into()) {
+                (Some(IncludeAttributes::Array(mut existing)), IncludeAttributes::Array(more)) => {
+                    existing.extend(more);
+                    IncludeAttributes::Array(existing)
+                }
+                (_, value) => value,
+            },
+        );
         self
     }
 
@@ -4667,6 +4716,11 @@ pub struct OperationError {
 pub struct ErrorResponse {
     /// The error message.
     pub error: String,
+    /// The status of the request.
+    ///
+    /// Always `"error"`.
+    #[serde(default)]
+    pub status: String,
 }
 
 /// The result of a query. With `aggregate_by`, `aggregations` maps each aggregation's label to its
@@ -5043,8 +5097,16 @@ impl Columns {
     }
 
     /// The vector embeddings of the documents.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn vector(mut self, vector: impl Into<ColumnsVector>) -> Self {
-        self.vector = Some(vector.into());
+        self.vector = Some(match (self.vector.take(), vector.into()) {
+            (Some(ColumnsVector::Array(mut existing)), ColumnsVector::Array(more)) => {
+                existing.extend(more);
+                ColumnsVector::Array(existing)
+            }
+            (_, value) => value,
+        });
         self
     }
 

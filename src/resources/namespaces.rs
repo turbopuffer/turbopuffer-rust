@@ -568,8 +568,21 @@ impl ExplainQueryRequest {
     }
 
     /// Whether to include attributes in the response.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn include_attributes(mut self, include_attributes: impl Into<IncludeAttributes>) -> Self {
-        self.body.include_attributes = Some(include_attributes.into());
+        self.body.include_attributes = Some(
+            match (
+                self.body.include_attributes.take(),
+                include_attributes.into(),
+            ) {
+                (Some(IncludeAttributes::Array(mut existing)), IncludeAttributes::Array(more)) => {
+                    existing.extend(more);
+                    IncludeAttributes::Array(existing)
+                }
+                (_, value) => value,
+            },
+        );
         self
     }
 
@@ -1101,8 +1114,21 @@ impl QueryRequest {
     }
 
     /// Whether to include attributes in the response.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn include_attributes(mut self, include_attributes: impl Into<IncludeAttributes>) -> Self {
-        self.body.include_attributes = Some(include_attributes.into());
+        self.body.include_attributes = Some(
+            match (
+                self.body.include_attributes.take(),
+                include_attributes.into(),
+            ) {
+                (Some(IncludeAttributes::Array(mut existing)), IncludeAttributes::Array(more)) => {
+                    existing.extend(more);
+                    IncludeAttributes::Array(existing)
+                }
+                (_, value) => value,
+            },
+        );
         self
     }
 

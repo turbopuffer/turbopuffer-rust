@@ -23,9 +23,12 @@ pub enum Error {
     Timeout,
 
     /// The API ran the request in the background, like a large `copy_from_namespace`, and it was still running
-    /// when the request's timeout ran out. The operation carries on: check on a copy with
-    /// [`Namespace::poll_copy_from`](crate::Namespace::poll_copy_from) and `token`. Sending the request again would
-    /// start another operation.
+    /// when the request's timeout ran out. The operation carries on.
+    ///
+    /// For a copy, check on it with [`Namespace::poll_copy_from`](crate::Namespace::poll_copy_from) and `token`,
+    /// rather than sending the request again, which would start another copy. Other operations, like recall
+    /// evaluations, can't be checked on with this SDK, and `poll_copy_from` can't decode their results: send those
+    /// again with a longer timeout.
     #[error("request timed out while operation {token} was still running")]
     OperationTimeout {
         /// The operation's token.
