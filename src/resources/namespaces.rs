@@ -1927,7 +1927,12 @@ impl WriteRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        crate::custom::vectors::encode_upserts(
+            self.body.schema.as_ref(),
+            self.body.upsert_rows.as_mut(),
+            self.body.upsert_columns.as_mut(),
+        );
         let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
         let request = ApiRequest::new(Method::POST, path)
             .json(&self.body)?
