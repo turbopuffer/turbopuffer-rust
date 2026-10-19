@@ -4,9 +4,9 @@
 //! Every request asks the API to respond asynchronously with `prefer: respond-async`, which it may do for
 //! long-running operations like `copy_from_namespace` and recall evaluation. It then responds with
 //! `202 Accepted` and a `location` to poll, which the client does until the operation finishes, returning its
-//! result as if the request had been synchronous. Polling stops with [`Error::Timeout`] once the request's
-//! timeout runs out, but the operation carries on in the background. Setting a `prefer` header on a request or
-//! client opts out.
+//! result as if the request had been synchronous. Polling stops with [`Error::OperationTimeout`] once the
+//! request's timeout runs out, but the operation carries on in the background, and the error has its token to
+//! check on it with. Setting a `prefer` header on a request or client opts out.
 //!
 //! See <https://turbopuffer.com/docs/api-overview#asynchronous-requests>.
 
@@ -62,14 +62,23 @@ impl Client {
             .options
             .max_retries
             .unwrap_or(self.inner.max_retries);
+        // Once the client stops waiting, the operation carries on, so the error says how to find it.
+        let timed_out = || Error::OperationTimeout {
+            token: operation_token(&location),
+            location: location.to_string(),
+        };
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return Err(Error::Timeout);
+                return Err(timed_out());
             }
-            let body = self
+            let body = match self
                 .poll(&location, remaining.min(POLL_TIMEOUT), max_retries)
-                .await?;
+                .await
+            {
+                Err(Error::Timeout) => return Err(timed_out()),
+                result => result?,
+            };
             match decode::<Operation>(&body)? {
                 Operation::Running {} => {}
                 Operation::Finished {
@@ -135,6 +144,16 @@ fn responded_async(response: &Response) -> bool {
             .get("preference-applied")
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.trim().eq_ignore_ascii_case(RESPOND_ASYNC))
+}
+
+/// The operation's token: the last segment of the URL to poll for it, like `tpuf-job-1` in
+/// `/v1/namespaces/ns/operations/tpuf-job-1`.
+fn operation_token(location: &Url) -> String {
+    location
+        .path_segments()
+        .and_then(|mut segments| segments.next_back())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The URL to poll for the operation, which must have the same origin as the request so that the API key isn't
@@ -364,6 +383,12 @@ mod tests {
         });
         let err = client.execute::<Value>(request).await.unwrap_err();
         assert!(err.is_timeout(), "{err:?}");
+        // The error has what's needed to check on the operation, which carries on.
+        let Error::OperationTimeout { token, location } = err else {
+            panic!("expected an operation timeout, got {err:?}");
+        };
+        assert_eq!(token, "tpuf-job-1");
+        assert_eq!(location, format!("{}{OPERATION}", server.uri()));
     }
 
     #[tokio::test]

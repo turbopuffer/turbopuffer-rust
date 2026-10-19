@@ -266,7 +266,7 @@ impl Client {
                     retry_after(response.headers())
                 }
                 Err(err) => {
-                    let retryable = err.is_timeout() || err.is_connect() || err.is_request();
+                    let retryable = is_retryable_reqwest_error(&err);
                     let err = observation.attempt_failed(err);
                     if attempt >= max_retries || !retryable {
                         return Err(err);
@@ -369,7 +369,7 @@ pub(crate) fn default_headers(stainless_headers: bool) -> HeaderMap {
     headers
 }
 
-fn should_retry(status: StatusCode, headers: &HeaderMap) -> bool {
+pub(crate) fn should_retry(status: StatusCode, headers: &HeaderMap) -> bool {
     match headers.get("x-should-retry").and_then(|v| v.to_str().ok()) {
         Some("true") => return true,
         Some("false") => return false,
@@ -379,6 +379,11 @@ fn should_retry(status: StatusCode, headers: &HeaderMap) -> bool {
         || status == StatusCode::CONFLICT
         || status == StatusCode::TOO_MANY_REQUESTS
         || status.is_server_error()
+}
+
+/// Whether a request that failed without a response is worth retrying.
+pub(crate) fn is_retryable_reqwest_error(err: &reqwest::Error) -> bool {
+    err.is_timeout() || err.is_connect() || err.is_request()
 }
 
 /// Parses `retry-after-ms` or `retry-after` (seconds or an HTTP date) from a response.
@@ -567,6 +572,40 @@ mod tests {
             assert_eq!(header("x-stainless-lang").as_deref(), Some("rust"));
             assert_eq!(header("x-stainless-retry-count").as_deref(), Some("0"));
             assert!(header("user-agent").is_some_and(|ua| ua.contains("/Rust ")));
+        }
+
+        #[tokio::test]
+        async fn decompresses_gzip_responses() {
+            // `{"ok":true}`, gzipped.
+            const GZIPPED: &[u8] = &[
+                0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xab, 0x56, 0xca, 0xcf,
+                0x56, 0xb2, 0x2a, 0x29, 0x2a, 0x4d, 0xad, 0x05, 0x00, 0x90, 0x5f, 0xd4, 0xa7, 0x0b,
+                0x00, 0x00, 0x00,
+            ];
+            let server = MockServer::start().await;
+            Mock::given(path("/thing"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-encoding", "gzip")
+                        .set_body_raw(GZIPPED, "application/json"),
+                )
+                .mount(&server)
+                .await;
+
+            let client = Client::for_tests(&server.uri());
+            let request = ApiRequest::new(reqwest::Method::GET, "/thing".to_owned());
+            let response: Value = client.execute(request).await.unwrap();
+            assert_eq!(response, json!({ "ok": true }));
+
+            let received = &server.received_requests().await.unwrap()[0];
+            let accept_encoding = received
+                .headers
+                .get("accept-encoding")
+                .and_then(|v| v.to_str().ok());
+            assert!(
+                accept_encoding.is_some_and(|v| v.contains("gzip")),
+                "{accept_encoding:?}"
+            );
         }
 
         #[tokio::test]
