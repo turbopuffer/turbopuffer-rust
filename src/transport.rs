@@ -25,9 +25,9 @@ mod respond_async;
 /// The longest `Retry-After` the client will honor. Longer values fall back to exponential backoff.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 
-/// Whether clients using compression also gzip request bodies (larger than `MIN_GZIP_SIZE`). They don't, since many
-/// APIs don't accept gzipped bodies. APIs that do can change this with custom code.
-const GZIP_REQUEST_BODIES: bool = false;
+/// Whether clients using compression also gzip request bodies (larger than `MIN_GZIP_SIZE`). This is custom code:
+/// turbopuffer accepts gzipped bodies, and its other SDKs gzip them when compression is on.
+const GZIP_REQUEST_BODIES: bool = true;
 
 /// Request bodies larger than this are gzipped, if they're gzipped at all. Smaller ones aren't worth the CPU.
 const MIN_GZIP_SIZE: usize = 1024;

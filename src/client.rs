@@ -178,14 +178,16 @@ impl ClientBuilder {
         self
     }
 
-    /// Whether clients use gzip compression unless [`compression`](Self::compression) says otherwise. Like most HTTP
-    /// clients, they do. APIs whose clients shouldn't by default can change this with custom code.
-    const DEFAULT_COMPRESSION: bool = true;
+    /// Whether clients use gzip compression unless [`compression`](Self::compression) says otherwise. This is custom
+    /// code: turbopuffer's clients are typically CPU-bound rather than limited by bandwidth, so like its other SDKs,
+    /// they don't by default. See <https://turbopuffer.com/docs/api-overview#compression>.
+    const DEFAULT_COMPRESSION: bool = false;
 
-    /// Whether to use gzip compression. Defaults to `true`.
+    /// Whether to use gzip compression. Defaults to `false`, since it usually costs more CPU than it saves in network
+    /// transfer.
     ///
-    /// When it's on, requests ask for gzipped responses. When it's off, they ask for uncompressed responses
-    /// (`accept-encoding: identity`).
+    /// When it's on, requests ask for gzipped responses, and request bodies larger than 1 KiB are gzipped. When it's
+    /// off, they ask for uncompressed responses (`accept-encoding: identity`).
     pub fn compression(mut self, compression: bool) -> Self {
         self.compression = Some(compression);
         self
