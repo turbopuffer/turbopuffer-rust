@@ -1,7 +1,13 @@
 //! Request and response types.
 //!
 //! Structs are `#[non_exhaustive]` so that new fields can be added without breaking changes. Construct
-//! request types with their `new` function and chainable setters.
+//! request types with their `new` function and chainable setters. Setters for lists and maps add to what
+//! they already hold, so calling one again adds more items rather than replacing them.
+//!
+//! Free-form values, like a filter's value or a row's attributes, take anything that implements
+//! `serde::Serialize`: numbers, strings, `serde_json::Value`s, `chrono` datetimes, and your own types. They
+//! panic if a value fails to serialize, like `serde_json::json!` does, which only happens for maps with keys
+//! that aren't strings or numbers, or `Serialize` implementations that return errors.
 
 mod namespaces;
 mod shared;
@@ -31,8 +37,10 @@ pub(crate) fn decode_element<T: serde::de::DeserializeOwned>(
     T::deserialize(value).ok()
 }
 
-/// Converts an expression to JSON, for its `From` conversion into `serde_json::Value`. This can't fail, since
-/// expressions only hold values that serialize to JSON, and maps with string keys.
-pub(crate) fn expression_to_json<T: serde::Serialize>(value: T) -> serde_json::Value {
-    serde_json::to_value(value).expect("expressions serialize to JSON")
+/// Converts a free-form value to JSON. Like `serde_json::json!`, this panics if the value doesn't serialize,
+/// which only happens for maps with keys that aren't strings or numbers, or `Serialize` implementations that
+/// return errors. Expressions and the types in this module always serialize.
+#[allow(dead_code)] // Unused by APIs without free-form values.
+pub(crate) fn to_json<T: serde::Serialize>(value: T) -> serde_json::Value {
+    serde_json::to_value(value).expect("value doesn't serialize to JSON")
 }

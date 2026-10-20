@@ -8,6 +8,9 @@ use serde_json::Value;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// An error returned by the client.
+///
+/// Errors caused by another error, like [`Error::Connection`], return it from [`std::error::Error::source`] rather
+/// than repeating it in their message, so error reporters like `anyhow`'s show each cause once.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -20,11 +23,11 @@ pub enum Error {
     Timeout,
 
     /// The request couldn't be sent or its response couldn't be read (after exhausting any retries).
-    #[error("connection error: {0}")]
+    #[error("connection error")]
     Connection(#[source] reqwest::Error),
 
     /// The response body couldn't be decoded into the expected type.
-    #[error("failed to decode response body: {source}")]
+    #[error("failed to decode response body")]
     Decode {
         /// The underlying JSON error.
         #[source]
@@ -34,14 +37,14 @@ pub enum Error {
     },
 
     /// The request body couldn't be encoded as JSON.
-    #[error("failed to encode request body: {0}")]
+    #[error("failed to encode request body")]
     Encode(#[source] serde_json::Error),
 
     /// A value couldn't be converted to or from JSON, e.g. by a type's `from_serializable` or `deserialize_as`.
     ///
     /// Converts from [`serde_json::Error`], so those conversions can use `?` in functions that return
     /// [`Result`].
-    #[error("failed to convert to or from JSON: {0}")]
+    #[error("failed to convert to or from JSON")]
     Json(#[from] serde_json::Error),
 
     /// The client is misconfigured, e.g. because it's missing an API key.
@@ -69,6 +72,18 @@ impl Error {
     /// Whether this is a timeout.
     pub fn is_timeout(&self) -> bool {
         matches!(self, Self::Timeout)
+    }
+
+    /// Whether the request might succeed if it's tried again: timeouts, connection errors, and the API errors the
+    /// client retries itself (see [`ApiError::is_retryable`]). The client has already retried these up to its
+    /// maximum number of retries before returning them.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Timeout => true,
+            Self::Connection(err) => crate::transport::is_retryable_reqwest_error(err),
+            Self::Api(err) => err.is_retryable(),
+            _ => false,
+        }
     }
 
     pub(crate) fn from_reqwest(err: reqwest::Error) -> Self {
@@ -102,6 +117,23 @@ pub struct ApiError {
 }
 
 impl ApiError {
+    /// Creates an error with the given status and message, e.g. to test how an application handles API errors.
+    /// Its body is `None` and it has no headers, but both can be set afterwards.
+    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            body: None,
+            headers: HeaderMap::new(),
+        }
+    }
+
+    /// Whether the client retries requests that fail with this error: `408`, `409`, `429`, and `5xx` statuses,
+    /// unless the API says otherwise with an `x-should-retry` header.
+    pub fn is_retryable(&self) -> bool {
+        crate::transport::should_retry(self.status, &self.headers)
+    }
+
     /// Classifies the error by its status code.
     pub fn kind(&self) -> ApiErrorKind {
         match self.status.as_u16() {
@@ -213,10 +245,34 @@ mod tests {
         }
         let err = parse("{").unwrap_err();
         assert!(matches!(err, Error::Json(_)));
+        // The cause is the error's source rather than part of its message.
+        assert_eq!(err.to_string(), "failed to convert to or from JSON");
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[test]
+    fn classifies_retryable_errors() {
+        assert!(Error::Timeout.is_retryable());
+        assert!(!Error::Config("missing API key".to_owned()).is_retryable());
         assert!(
-            err.to_string()
-                .starts_with("failed to convert to or from JSON: ")
+            Error::from(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "slow down")).is_retryable()
         );
+        assert!(Error::from(ApiError::new(StatusCode::BAD_GATEWAY, "bad gateway")).is_retryable());
+        assert!(!Error::from(ApiError::new(StatusCode::NOT_FOUND, "not found")).is_retryable());
+
+        // The API can override the default with `x-should-retry`.
+        let mut err = ApiError::new(StatusCode::BAD_GATEWAY, "bad gateway");
+        err.headers
+            .insert("x-should-retry", "false".parse().unwrap());
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn builds_api_errors() {
+        let err = ApiError::new(StatusCode::NOT_FOUND, "namespace not found");
+        assert_eq!(err.kind(), ApiErrorKind::NotFound);
+        assert_eq!(err.to_string(), "404 Not Found: namespace not found");
+        assert_eq!(err.body, None);
     }
 
     #[tokio::test]

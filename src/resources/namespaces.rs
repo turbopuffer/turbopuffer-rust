@@ -14,13 +14,12 @@ use crate::error::Result;
 use crate::transport::{ApiRequest, RequestOptions, encode_path_segment};
 use crate::types::{
     AggregateBy, AttributeSchema, BranchFromNamespaceParams, Columns, CopyFromNamespaceOperation,
-    CopyFromNamespaceParams, DistanceMetric, Encryption, Expr, Filter, GroupBy, Id,
-    IncludeAttributes, MultiQueryLimit, MultiQueryResult, NamespaceDeleteAllResponse,
-    NamespaceExplainQueryResponse, NamespaceHintCacheWarmResponse, NamespaceMetadata,
-    NamespaceMetadataPatchPinning, NamespaceRecallResponse, NamespaceSchemaResponse,
-    NamespaceStartCopyFromResponse, NamespaceUpdateSchemaResponse, PatchByFilter, Query,
-    QueryConfigConsistency, QueryLimit, QueryResult, RankBy, RerankBy, RerankModelParams, Row,
-    ShardingConfig, VectorEncoding, WriteResult,
+    CopyFromNamespaceParams, DeleteAllResponse, DistanceMetric, Encryption, ExplainQueryResponse,
+    Expr, Filter, GroupBy, HintCacheWarmResponse, Id, IncludeAttributes, MultiQueryLimit,
+    MultiQueryResult, NamespaceMetadata, NamespaceMetadataPatchPinning, PatchByFilter, Query,
+    QueryConfigConsistency, QueryLimit, QueryResult, RankBy, RecallResponse, RerankBy,
+    RerankModelParams, Row, SchemaResponse, ShardingConfig, StartCopyFromResponse,
+    UpdateSchemaResponse, VectorEncoding, WriteResult,
 };
 
 /// A handle to a single namespace, returned by [`Client::namespace`].
@@ -47,8 +46,8 @@ impl Client {
 }
 
 impl Namespace {
-    /// The namespace this handle refers to.
-    pub fn namespace(&self) -> &str {
+    /// The ID of the namespace this handle refers to, its `namespace`.
+    pub fn id(&self) -> &str {
         &self.namespace
     }
 }
@@ -275,7 +274,7 @@ pub struct CopyFromRequest {
     options: RequestOptions,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 struct CopyFromBody {
     source_namespace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -284,6 +283,20 @@ struct CopyFromBody {
     source_api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     source_region: Option<String>,
+}
+
+impl std::fmt::Debug for CopyFromBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CopyFromBody")
+            .field("source_namespace", &self.source_namespace)
+            .field("dest_encryption", &self.dest_encryption)
+            .field(
+                "source_api_key",
+                &self.source_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("source_region", &self.source_region)
+            .finish()
+    }
 }
 
 impl CopyFromRequest {
@@ -408,14 +421,14 @@ impl DeleteAllRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceDeleteAllResponse> {
+    pub async fn send(self) -> Result<DeleteAllResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for DeleteAllRequest {
-    type Output = Result<NamespaceDeleteAllResponse>;
+    type Output = Result<DeleteAllResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -477,31 +490,35 @@ impl ExplainQueryRequest {
     }
 
     /// Aggregations to compute over all documents in the namespace that match the filters.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn aggregate_by(
         mut self,
         aggregate_by: impl IntoIterator<Item = (impl Into<String>, impl Into<AggregateBy>)>,
     ) -> Self {
-        self.body.aggregate_by = Some(
-            aggregate_by
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.body
+            .aggregate_by
+            .get_or_insert_with(Default::default)
+            .extend(aggregate_by.into_iter().map(|(k, v)| (k.into(), v.into())));
         self
     }
 
     /// Computes additional values on documents returned by a query. Each key is the name of the
     /// computed attribute; each value is an expression describing how to compute it.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn compute_attributes(
         mut self,
         compute_attributes: impl IntoIterator<Item = (impl Into<String>, impl Into<Expr>)>,
     ) -> Self {
-        self.body.compute_attributes = Some(
-            compute_attributes
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.body
+            .compute_attributes
+            .get_or_insert_with(Default::default)
+            .extend(
+                compute_attributes
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into())),
+            );
         self
     }
 
@@ -519,12 +536,16 @@ impl ExplainQueryRequest {
 
     /// List of attribute names to exclude from the response. All other attributes will be included in
     /// the response.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn exclude_attributes(
         mut self,
         exclude_attributes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        self.body.exclude_attributes =
-            Some(exclude_attributes.into_iter().map(Into::into).collect());
+        self.body
+            .exclude_attributes
+            .get_or_insert_with(Default::default)
+            .extend(exclude_attributes.into_iter().map(Into::into));
         self
     }
 
@@ -536,14 +557,32 @@ impl ExplainQueryRequest {
 
     /// Groups documents by the specified attributes (the "group key") before computing aggregates.
     /// Aggregates are computed separately for each group.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn group_by(mut self, group_by: impl IntoIterator<Item = impl Into<GroupBy>>) -> Self {
-        self.body.group_by = Some(group_by.into_iter().map(Into::into).collect());
+        self.body
+            .group_by
+            .get_or_insert_with(Default::default)
+            .extend(group_by.into_iter().map(Into::into));
         self
     }
 
     /// Whether to include attributes in the response.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn include_attributes(mut self, include_attributes: impl Into<IncludeAttributes>) -> Self {
-        self.body.include_attributes = Some(include_attributes.into());
+        self.body.include_attributes = Some(
+            match (
+                self.body.include_attributes.take(),
+                include_attributes.into(),
+            ) {
+                (Some(IncludeAttributes::Array(mut existing)), IncludeAttributes::Array(more)) => {
+                    existing.extend(more);
+                    IncludeAttributes::Array(existing)
+                }
+                (_, value) => value,
+            },
+        );
         self
     }
 
@@ -608,14 +647,14 @@ impl ExplainQueryRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceExplainQueryResponse> {
+    pub async fn send(self) -> Result<ExplainQueryResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for ExplainQueryRequest {
-    type Output = Result<NamespaceExplainQueryResponse>;
+    type Output = Result<ExplainQueryResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -672,14 +711,14 @@ impl HintCacheWarmRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceHintCacheWarmResponse> {
+    pub async fn send(self) -> Result<HintCacheWarmResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for HintCacheWarmRequest {
-    type Output = Result<NamespaceHintCacheWarmResponse>;
+    type Output = Result<HintCacheWarmResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -997,31 +1036,35 @@ impl QueryRequest {
     }
 
     /// Aggregations to compute over all documents in the namespace that match the filters.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn aggregate_by(
         mut self,
         aggregate_by: impl IntoIterator<Item = (impl Into<String>, impl Into<AggregateBy>)>,
     ) -> Self {
-        self.body.aggregate_by = Some(
-            aggregate_by
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.body
+            .aggregate_by
+            .get_or_insert_with(Default::default)
+            .extend(aggregate_by.into_iter().map(|(k, v)| (k.into(), v.into())));
         self
     }
 
     /// Computes additional values on documents returned by a query. Each key is the name of the
     /// computed attribute; each value is an expression describing how to compute it.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn compute_attributes(
         mut self,
         compute_attributes: impl IntoIterator<Item = (impl Into<String>, impl Into<Expr>)>,
     ) -> Self {
-        self.body.compute_attributes = Some(
-            compute_attributes
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.body
+            .compute_attributes
+            .get_or_insert_with(Default::default)
+            .extend(
+                compute_attributes
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into())),
+            );
         self
     }
 
@@ -1039,12 +1082,16 @@ impl QueryRequest {
 
     /// List of attribute names to exclude from the response. All other attributes will be included in
     /// the response.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn exclude_attributes(
         mut self,
         exclude_attributes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        self.body.exclude_attributes =
-            Some(exclude_attributes.into_iter().map(Into::into).collect());
+        self.body
+            .exclude_attributes
+            .get_or_insert_with(Default::default)
+            .extend(exclude_attributes.into_iter().map(Into::into));
         self
     }
 
@@ -1056,14 +1103,32 @@ impl QueryRequest {
 
     /// Groups documents by the specified attributes (the "group key") before computing aggregates.
     /// Aggregates are computed separately for each group.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn group_by(mut self, group_by: impl IntoIterator<Item = impl Into<GroupBy>>) -> Self {
-        self.body.group_by = Some(group_by.into_iter().map(Into::into).collect());
+        self.body
+            .group_by
+            .get_or_insert_with(Default::default)
+            .extend(group_by.into_iter().map(Into::into));
         self
     }
 
     /// Whether to include attributes in the response.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn include_attributes(mut self, include_attributes: impl Into<IncludeAttributes>) -> Self {
-        self.body.include_attributes = Some(include_attributes.into());
+        self.body.include_attributes = Some(
+            match (
+                self.body.include_attributes.take(),
+                include_attributes.into(),
+            ) {
+                (Some(IncludeAttributes::Array(mut existing)), IncludeAttributes::Array(more)) => {
+                    existing.extend(more);
+                    IncludeAttributes::Array(existing)
+                }
+                (_, value) => value,
+            },
+        );
         self
     }
 
@@ -1246,14 +1311,14 @@ impl RecallRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceRecallResponse> {
+    pub async fn send(self) -> Result<RecallResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for RecallRequest {
-    type Output = Result<NamespaceRecallResponse>;
+    type Output = Result<RecallResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -1310,14 +1375,14 @@ impl SchemaRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceSchemaResponse> {
+    pub async fn send(self) -> Result<SchemaResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for SchemaRequest {
-    type Output = Result<NamespaceSchemaResponse>;
+    type Output = Result<SchemaResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -1338,7 +1403,7 @@ pub struct StartCopyFromRequest {
     options: RequestOptions,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 struct StartCopyFromBody {
     source_namespace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1347,6 +1412,20 @@ struct StartCopyFromBody {
     source_api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     source_region: Option<String>,
+}
+
+impl std::fmt::Debug for StartCopyFromBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StartCopyFromBody")
+            .field("source_namespace", &self.source_namespace)
+            .field("dest_encryption", &self.dest_encryption)
+            .field(
+                "source_api_key",
+                &self.source_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("source_region", &self.source_region)
+            .finish()
+    }
 }
 
 impl StartCopyFromRequest {
@@ -1413,14 +1492,14 @@ impl StartCopyFromRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceStartCopyFromResponse> {
+    pub async fn send(self) -> Result<StartCopyFromResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for StartCopyFromRequest {
-    type Output = Result<NamespaceStartCopyFromResponse>;
+    type Output = Result<StartCopyFromResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -1576,14 +1655,14 @@ impl UpdateSchemaRequest {
     }
 
     /// Sends the request.
-    pub async fn send(self) -> Result<NamespaceUpdateSchemaResponse> {
+    pub async fn send(self) -> Result<UpdateSchemaResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
 }
 
 impl IntoFuture for UpdateSchemaRequest {
-    type Output = Result<NamespaceUpdateSchemaResponse>;
+    type Output = Result<UpdateSchemaResponse>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -1709,9 +1788,14 @@ impl WriteRequest {
         self
     }
 
-    /// Body param
+    /// Sets `deletes`.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn deletes(mut self, deletes: impl IntoIterator<Item = impl Into<Id>>) -> Self {
-        self.body.deletes = Some(deletes.into_iter().map(Into::into).collect());
+        self.body
+            .deletes
+            .get_or_insert_with(Default::default)
+            .extend(deletes.into_iter().map(Into::into));
         self
     }
 
@@ -1759,9 +1843,14 @@ impl WriteRequest {
         self
     }
 
-    /// Body param
+    /// Sets `patch_rows`.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn patch_rows(mut self, patch_rows: impl IntoIterator<Item = impl Into<Row>>) -> Self {
-        self.body.patch_rows = Some(patch_rows.into_iter().map(Into::into).collect());
+        self.body
+            .patch_rows
+            .get_or_insert_with(Default::default)
+            .extend(patch_rows.into_iter().map(Into::into));
         self
     }
 
@@ -1773,16 +1862,16 @@ impl WriteRequest {
     }
 
     /// The schema of the attributes attached to the documents.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn schema(
         mut self,
         schema: impl IntoIterator<Item = (impl Into<String>, impl Into<AttributeSchema>)>,
     ) -> Self {
-        self.body.schema = Some(
-            schema
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.body
+            .schema
+            .get_or_insert_with(Default::default)
+            .extend(schema.into_iter().map(|(k, v)| (k.into(), v.into())));
         self
     }
 
@@ -1809,9 +1898,14 @@ impl WriteRequest {
         self
     }
 
-    /// Body param
+    /// Sets `upsert_rows`.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn upsert_rows(mut self, upsert_rows: impl IntoIterator<Item = impl Into<Row>>) -> Self {
-        self.body.upsert_rows = Some(upsert_rows.into_iter().map(Into::into).collect());
+        self.body
+            .upsert_rows
+            .get_or_insert_with(Default::default)
+            .extend(upsert_rows.into_iter().map(Into::into));
         self
     }
 

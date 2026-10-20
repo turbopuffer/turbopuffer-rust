@@ -20,6 +20,11 @@ pub struct WriteResult {
     pub message: String,
     /// The number of rows affected by the write request.
     pub rows_affected: u64,
+    /// The status of the request.
+    ///
+    /// Always `"OK"`.
+    #[serde(default)]
+    pub status: String,
     /// The IDs of documents that were deleted. Only included when `return_affected_ids` is true and
     /// at least one document was deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -183,15 +188,41 @@ impl EncryptionCustomerManaged {
     }
 }
 
+impl From<String> for EncryptionCustomerManaged {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for EncryptionCustomerManaged {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
 /// The response to a successful namespace deletion request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct NamespaceDeleteAllResponse {}
+pub struct DeleteAllResponse {
+    /// The status of the request.
+    ///
+    /// Always `"OK"`.
+    #[serde(default)]
+    pub status: String,
+}
+
+impl Default for DeleteAllResponse {
+    fn default() -> Self {
+        Self {
+            status: "OK".to_owned(),
+        }
+    }
+}
 
 /// An aggregate function to compute over all documents in the namespace.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
-/// [`AggregateBy::sum`].
+/// [`AggregateBy::count`].
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum AggregateBy {
@@ -203,6 +234,7 @@ pub enum AggregateBy {
         attr: String,
     },
     /// Count documents with a non-null value for the given attribute.
+    #[deprecated]
     CountDeprecated {
         /// The name of the attribute to count (only documents with non-null values for the
         /// attribute are counted). DEPRECATED. Use `Count` instead.
@@ -212,12 +244,18 @@ pub enum AggregateBy {
 
 #[allow(deprecated)]
 impl AggregateBy {
+    /// Count documents.
+    pub fn count() -> Self {
+        Self::Count
+    }
+
     /// Sum the values of the given attribute.
     pub fn sum(attr: impl Into<String>) -> Self {
         Self::Sum { attr: attr.into() }
     }
 
     /// Count documents with a non-null value for the given attribute.
+    #[deprecated]
     pub fn count_deprecated(attr: impl Into<String>) -> Self {
         Self::CountDeprecated { attr: attr.into() }
     }
@@ -259,7 +297,7 @@ impl<'de> Deserialize<'de> for AggregateBy {
 
 impl From<AggregateBy> for Value {
     fn from(value: AggregateBy) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -277,14 +315,8 @@ pub enum Expr {
     Embed {
         /// The input text to embed.
         value: String,
-    },
-    /// Embed the input text using the specified embedding model, overriding the model configured
-    /// for the attribute the expression is evaluated against.
-    EmbedWithParams {
-        /// The input text to embed.
-        value: String,
         /// Additional (optional) parameters for the Embed expression.
-        params: EmbedParams,
+        params: Option<EmbedParams>,
     },
     /// The distance between a vector attribute and a query vector.
     VectorDist {
@@ -297,13 +329,8 @@ pub enum Expr {
     Highlight {
         /// The name of the text attribute to highlight.
         attr: String,
-    },
-    /// Highlights matching fragments of a text attribute, with additional configuration.
-    HighlightWithConfig {
-        /// The name of the text attribute to highlight.
-        attr: String,
         /// Additional (optional) parameters for the Highlight compute expression.
-        config: HighlightConfigParams,
+        config: Option<HighlightConfigParams>,
     },
     /// The score of a ranking function, e.g. to return the score of one clause of a composite
     /// `rank_by`.
@@ -317,15 +344,18 @@ impl Expr {
     pub fn embed(value: impl Into<String>) -> Self {
         Self::Embed {
             value: value.into(),
+            params: None,
         }
     }
 
-    /// Embed the input text using the specified embedding model, overriding the model configured for
-    /// the attribute the expression is evaluated against.
+    /// Embed the input text using the embedding model configured for the attribute the expression is
+    /// evaluated against.
+    ///
+    /// Like [`Expr::embed`], with `params`.
     pub fn embed_with_params(value: impl Into<String>, params: impl Into<EmbedParams>) -> Self {
-        Self::EmbedWithParams {
+        Self::Embed {
             value: value.into(),
-            params: params.into(),
+            params: Some(params.into()),
         }
     }
 
@@ -339,17 +369,22 @@ impl Expr {
 
     /// Highlights matching fragments of a text attribute.
     pub fn highlight(attr: impl Into<String>) -> Self {
-        Self::Highlight { attr: attr.into() }
+        Self::Highlight {
+            attr: attr.into(),
+            config: None,
+        }
     }
 
-    /// Highlights matching fragments of a text attribute, with additional configuration.
+    /// Highlights matching fragments of a text attribute.
+    ///
+    /// Like [`Expr::highlight`], with `config`.
     pub fn highlight_with_config(
         attr: impl Into<String>,
         config: impl Into<HighlightConfigParams>,
     ) -> Self {
-        Self::HighlightWithConfig {
+        Self::Highlight {
             attr: attr.into(),
-            config: config.into(),
+            config: Some(config.into()),
         }
     }
 
@@ -377,20 +412,31 @@ impl From<RankBy> for Expr {
     }
 }
 
+impl From<RankByText> for Expr {
+    fn from(value: RankByText) -> Self {
+        Self::Score(Box::new(RankBy::from(value)))
+    }
+}
+
 #[allow(deprecated)]
 impl Serialize for Expr {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::RefNew(value) => value.serialize(serializer),
-            Self::Embed { value } => ("Embed", value).serialize(serializer),
-            Self::EmbedWithParams { value, params } => {
-                ("Embed", value, params).serialize(serializer)
-            }
+            Self::Embed {
+                value,
+                params: None,
+            } => ("Embed", value).serialize(serializer),
+            Self::Embed {
+                value,
+                params: Some(params),
+            } => ("Embed", value, params).serialize(serializer),
             Self::VectorDist { attr, value } => (attr, "VectorDist", value).serialize(serializer),
-            Self::Highlight { attr } => ("Highlight", attr).serialize(serializer),
-            Self::HighlightWithConfig { attr, config } => {
-                ("Highlight", attr, config).serialize(serializer)
-            }
+            Self::Highlight { attr, config: None } => ("Highlight", attr).serialize(serializer),
+            Self::Highlight {
+                attr,
+                config: Some(config),
+            } => ("Highlight", attr, config).serialize(serializer),
             Self::Score(value) => value.serialize(serializer),
         }
     }
@@ -403,16 +449,22 @@ impl<'de> Deserialize<'de> for Expr {
         if let Some(value) = decode_element(&value) {
             return Ok(Self::RefNew(value));
         }
-        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Embed")]) {
-            if let Some(value) = decode_element(&elements[1]) {
-                return Ok(Self::Embed { value });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 3, &[(0, "Embed")]) {
             if let (Some(value), Some(params)) =
                 (decode_element(&elements[1]), decode_element(&elements[2]))
             {
-                return Ok(Self::EmbedWithParams { value, params });
+                return Ok(Self::Embed {
+                    value,
+                    params: Some(params),
+                });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Embed")]) {
+            if let Some(value) = decode_element(&elements[1]) {
+                return Ok(Self::Embed {
+                    value,
+                    params: None,
+                });
             }
         }
         if let Some(elements) = tuple_elements(&value, 3, &[(1, "VectorDist")]) {
@@ -422,16 +474,19 @@ impl<'de> Deserialize<'de> for Expr {
                 return Ok(Self::VectorDist { attr, value });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Highlight")]) {
-            if let Some(attr) = decode_element(&elements[1]) {
-                return Ok(Self::Highlight { attr });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 3, &[(0, "Highlight")]) {
             if let (Some(attr), Some(config)) =
                 (decode_element(&elements[1]), decode_element(&elements[2]))
             {
-                return Ok(Self::HighlightWithConfig { attr, config });
+                return Ok(Self::Highlight {
+                    attr,
+                    config: Some(config),
+                });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Highlight")]) {
+            if let Some(attr) = decode_element(&elements[1]) {
+                return Ok(Self::Highlight { attr, config: None });
             }
         }
         if let Some(value) = decode_element(&value) {
@@ -443,7 +498,7 @@ impl<'de> Deserialize<'de> for Expr {
 
 impl From<Expr> for Value {
     fn from(value: Expr) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -467,7 +522,19 @@ impl ExprRefNew {
 
 impl From<ExprRefNew> for Value {
     fn from(value: ExprRefNew) -> Self {
-        expression_to_json(value)
+        to_json(value)
+    }
+}
+
+impl From<String> for ExprRefNew {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for ExprRefNew {
+    fn from(value: &str) -> Self {
+        Self::new(value)
     }
 }
 
@@ -755,43 +822,48 @@ impl RankBy {
     /// full-text search scoring function, which scores documents higher when they contain more of the
     /// query's terms, especially rare ones).
     ///
-    /// Shorthand for [`RankByText::bm25`].
-    pub fn bm25(attr: impl Into<String>, value: impl Into<RankByTextBm25Value>) -> Self {
-        RankByText::bm25(attr, value).into()
+    /// Shorthand for [`RankByText::bm25`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn bm25(attr: impl Into<String>, value: impl Into<RankByTextBm25Value>) -> RankByText {
+        RankByText::bm25(attr, value)
     }
 
     /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
     /// full-text search scoring function, which scores documents higher when they contain more of the
-    /// query's terms, especially rare ones), with additional parameters.
+    /// query's terms, especially rare ones).
     ///
-    /// Shorthand for [`RankByText::bm25_with_params`].
+    /// Shorthand for [`RankByText::bm25_with_params`]. It returns a [`RankByText`], which converts into
+    /// a [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
     pub fn bm25_with_params(
         attr: impl Into<String>,
         value: impl Into<RankByTextBm25Value>,
         params: impl Into<Bm25ClauseParams>,
-    ) -> Self {
-        RankByText::bm25_with_params(attr, value, params).into()
+    ) -> RankByText {
+        RankByText::bm25_with_params(attr, value, params)
     }
 
     /// Sum the scores of the subqueries.
     ///
-    /// Shorthand for [`RankByText::sum`].
-    pub fn sum(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> Self {
-        RankByText::sum(subqueries).into()
+    /// Shorthand for [`RankByText::sum`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn sum(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> RankByText {
+        RankByText::sum(subqueries)
     }
 
     /// Use the highest score of the subqueries.
     ///
-    /// Shorthand for [`RankByText::max`].
-    pub fn max(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> Self {
-        RankByText::max(subqueries).into()
+    /// Shorthand for [`RankByText::max`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn max(subqueries: impl IntoIterator<Item = impl Into<RankByText>>) -> RankByText {
+        RankByText::max(subqueries)
     }
 
     /// Multiply a subquery's score by a non-negative weight, e.g. to boost one attribute over others.
     ///
-    /// Shorthand for [`RankByText::product`].
-    pub fn product(weight: f64, subquery: impl Into<RankByText>) -> Self {
-        RankByText::product(weight, subquery).into()
+    /// Shorthand for [`RankByText::product`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn product(weight: f64, subquery: impl Into<RankByText>) -> RankByText {
+        RankByText::product(weight, subquery)
     }
 
     /// Map a non-negative score into `[0, 1)` with `x^exponent / (x^exponent + midpoint^exponent)`,
@@ -799,26 +871,32 @@ impl RankBy {
     /// full-text search scoring function, which scores documents higher when they contain more of the
     /// query's terms, especially rare ones).
     ///
-    /// Shorthand for [`RankByText::saturate`].
-    pub fn saturate(subquery: impl Into<RankByText>, params: impl Into<SaturateParams>) -> Self {
-        RankByText::saturate(subquery, params).into()
+    /// Shorthand for [`RankByText::saturate`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn saturate(
+        subquery: impl Into<RankByText>,
+        params: impl Into<SaturateParams>,
+    ) -> RankByText {
+        RankByText::saturate(subquery, params)
     }
 
     /// Map a non-negative score into `(0, 1]` with `midpoint^exponent / (x^exponent +
     /// midpoint^exponent)`, the inverse of `Saturate`, e.g. for an attribute whose higher values make
     /// documents less relevant.
     ///
-    /// Shorthand for [`RankByText::decay`].
-    pub fn decay(subquery: impl Into<RankByText>, params: impl Into<DecayParams>) -> Self {
-        RankByText::decay(subquery, params).into()
+    /// Shorthand for [`RankByText::decay`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn decay(subquery: impl Into<RankByText>, params: impl Into<DecayParams>) -> RankByText {
+        RankByText::decay(subquery, params)
     }
 
     /// The distance between a subquery's value and an origin, e.g. to boost recent documents by passing
     /// the distance from now to `Decay`.
     ///
-    /// Shorthand for [`RankByText::dist`].
-    pub fn dist(subquery: impl Into<RankByText>, origin: impl Into<Value>) -> Self {
-        RankByText::dist(subquery, origin).into()
+    /// Shorthand for [`RankByText::dist`]. It returns a [`RankByText`], which converts into a
+    /// [`RankBy`], so it can also be combined with [`RankByText`]'s other functions.
+    pub fn dist(subquery: impl Into<RankByText>, origin: impl Serialize) -> RankByText {
+        RankByText::dist(subquery, origin)
     }
 }
 
@@ -900,7 +978,7 @@ impl<'de> Deserialize<'de> for RankBy {
 
 impl From<RankBy> for Value {
     fn from(value: RankBy) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -920,16 +998,8 @@ pub enum RankByText {
         /// The name of the attribute to rank by.
         attr: String,
         value: RankByTextBm25Value,
-    },
-    /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a
-    /// classic full-text search scoring function, which scores documents higher when they contain
-    /// more of the query's terms, especially rare ones), with additional parameters.
-    Bm25WithParams {
-        /// The name of the attribute to rank by.
-        attr: String,
-        value: RankByTextBm25Value,
         /// Additional (optional) parameters for a single BM25 query clause.
-        params: Bm25ClauseParams,
+        params: Option<Bm25ClauseParams>,
     },
     /// Sum the scores of the subqueries.
     Sum {
@@ -996,21 +1066,24 @@ impl RankByText {
         Self::Bm25 {
             attr: attr.into(),
             value: value.into(),
+            params: None,
         }
     }
 
     /// Rank by how relevant an attribute is to a query string, using BM25 (Best Matching 25, a classic
     /// full-text search scoring function, which scores documents higher when they contain more of the
-    /// query's terms, especially rare ones), with additional parameters.
+    /// query's terms, especially rare ones).
+    ///
+    /// Like [`RankByText::bm25`], with `params`.
     pub fn bm25_with_params(
         attr: impl Into<String>,
         value: impl Into<RankByTextBm25Value>,
         params: impl Into<Bm25ClauseParams>,
     ) -> Self {
-        Self::Bm25WithParams {
+        Self::Bm25 {
             attr: attr.into(),
             value: value.into(),
-            params: params.into(),
+            params: Some(params.into()),
         }
     }
 
@@ -1065,10 +1138,10 @@ impl RankByText {
 
     /// The distance between a subquery's value and an origin, e.g. to boost recent documents by passing
     /// the distance from now to `Decay`.
-    pub fn dist(subquery: impl Into<RankByText>, origin: impl Into<Value>) -> Self {
+    pub fn dist(subquery: impl Into<RankByText>, origin: impl Serialize) -> Self {
         Self::Dist {
             subquery: Box::new(subquery.into()),
-            origin: origin.into(),
+            origin: to_json(origin),
         }
     }
 
@@ -1089,11 +1162,15 @@ impl From<Filter> for RankByText {
 impl Serialize for RankByText {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Bm25 { attr, value } => (attr, "BM25", value).serialize(serializer),
-            Self::Bm25WithParams {
+            Self::Bm25 {
                 attr,
                 value,
-                params,
+                params: None,
+            } => (attr, "BM25", value).serialize(serializer),
+            Self::Bm25 {
+                attr,
+                value,
+                params: Some(params),
             } => (attr, "BM25", value, params).serialize(serializer),
             Self::Sum { subqueries } => ("Sum", subqueries).serialize(serializer),
             Self::Max { subqueries } => ("Max", subqueries).serialize(serializer),
@@ -1115,23 +1192,27 @@ impl Serialize for RankByText {
 impl<'de> Deserialize<'de> for RankByText {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "BM25")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::Bm25 { attr, value });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 4, &[(1, "BM25")]) {
             if let (Some(attr), Some(value), Some(params)) = (
                 decode_element(&elements[0]),
                 decode_element(&elements[2]),
                 decode_element(&elements[3]),
             ) {
-                return Ok(Self::Bm25WithParams {
+                return Ok(Self::Bm25 {
                     attr,
                     value,
-                    params,
+                    params: Some(params),
+                });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 3, &[(1, "BM25")]) {
+            if let (Some(attr), Some(value)) =
+                (decode_element(&elements[0]), decode_element(&elements[2]))
+            {
+                return Ok(Self::Bm25 {
+                    attr,
+                    value,
+                    params: None,
                 });
             }
         }
@@ -1189,7 +1270,7 @@ impl<'de> Deserialize<'de> for RankByText {
 
 impl From<RankByText> for Value {
     fn from(value: RankByText) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -1397,15 +1478,8 @@ pub enum Filter {
         /// The name of the attribute to apply the filter to.
         attr: String,
         value: FilterContainsAllTokensValue,
-    },
-    /// Matches if all tokens in the input string are present in the attributes value. Requires that
-    /// the attribute is configured for full-text search.
-    ContainsAllTokensWithParams {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        value: FilterContainsAllTokensValue,
         /// Additional (optional) parameters for the ContainsAllTokens filter.
-        params: ContainsAllTokensFilterParams,
+        params: Option<ContainsAllTokensFilterParams>,
     },
     /// Matches if any of the tokens in the input string are present in the attribute value.
     /// Requires that the attribute is configured for full-text search.
@@ -1413,15 +1487,8 @@ pub enum Filter {
         /// The name of the attribute to apply the filter to.
         attr: String,
         value: FilterContainsAnyTokenValue,
-    },
-    /// Matches if any of the tokens in the input string are present in the attribute value.
-    /// Requires that the attribute is configured for full-text search.
-    ContainsAnyTokenWithParams {
-        /// The name of the attribute to apply the filter to.
-        attr: String,
-        value: FilterContainsAnyTokenValue,
         /// Additional (optional) parameters for the ContainsAnyToken filter.
-        params: ContainsAnyTokenFilterParams,
+        params: Option<ContainsAnyTokenFilterParams>,
     },
     /// Matches if all the tokens in the input string are present in the attribute value, in the
     /// correct order (i.e., as a phrase). Requires that the attribute is configured for full-text
@@ -1451,53 +1518,53 @@ pub enum Filter {
 #[allow(deprecated)]
 impl Filter {
     /// Exact match for attribute value. If `null`, matches documents missing the attribute.
-    pub fn eq(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn eq(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::Eq {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Inverse of `Eq`. If value is `null`, matches documents with the attribute.
-    pub fn not_eq(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn not_eq(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::NotEq {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Matches any attribute value contained in the provided list.
-    pub fn in_(attr: impl Into<String>, value: impl IntoIterator<Item = impl Into<Value>>) -> Self {
+    pub fn in_(attr: impl Into<String>, value: impl IntoIterator<Item = impl Serialize>) -> Self {
         Self::In {
             attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
+            value: value.into_iter().map(to_json).collect(),
         }
     }
 
     /// Inverse of `In`, matches any attributes values not contained in the provided list.
     pub fn not_in(
         attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<Value>>,
+        value: impl IntoIterator<Item = impl Serialize>,
     ) -> Self {
         Self::NotIn {
             attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
+            value: value.into_iter().map(to_json).collect(),
         }
     }
 
     /// Checks whether the selected array attribute contains the provided value.
-    pub fn contains(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn contains(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::Contains {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Inverse of Contains
-    pub fn not_contains(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn not_contains(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::NotContains {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
@@ -1505,95 +1572,95 @@ impl Filter {
     /// filter).
     pub fn contains_any(
         attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<Value>>,
+        value: impl IntoIterator<Item = impl Serialize>,
     ) -> Self {
         Self::ContainsAny {
             attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
+            value: value.into_iter().map(to_json).collect(),
         }
     }
 
     /// Inverse of ContainsAny.
     pub fn not_contains_any(
         attr: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<Value>>,
+        value: impl IntoIterator<Item = impl Serialize>,
     ) -> Self {
         Self::NotContainsAny {
             attr: attr.into(),
-            value: value.into_iter().map(Into::into).collect(),
+            value: value.into_iter().map(to_json).collect(),
         }
     }
 
     /// For ints, this is a numeric less-than. For strings, lexicographic less-than. For datetimes,
     /// numeric less-than on millisecond representation.
-    pub fn lt(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn lt(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::Lt {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// For ints, this is a numeric less-than-or-equal. For strings, lexicographic less-than-or-equal.
     /// For datetimes, numeric less-than-or-equal on millisecond representation.
-    pub fn lte(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn lte(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::Lte {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// For ints, this is a numeric greater-than. For strings, lexicographic greater-than. For
     /// datetimes, numeric greater-than on millisecond representation.
-    pub fn gt(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn gt(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::Gt {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// For ints, this is a numeric greater-than-or-equal. For strings, lexicographic
     /// greater-than-or-equal. For datetimes, numeric greater-than-or-equal on millisecond
     /// representation.
-    pub fn gte(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn gte(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::Gte {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Checks whether any element of an array attribute is less than the provided value, using the same
     /// rules as `Lt`.
-    pub fn any_lt(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn any_lt(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::AnyLt {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Checks whether any element of an array attribute is less than or equal to the provided value,
     /// using the same rules as `Lte`.
-    pub fn any_lte(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn any_lte(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::AnyLte {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Checks whether any element of an array attribute is greater than the provided value, using the
     /// same rules as `Gt`.
-    pub fn any_gt(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn any_gt(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::AnyGt {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
     /// Checks whether any element of an array attribute is greater than or equal to the provided value,
     /// using the same rules as `Gte`.
-    pub fn any_gte(attr: impl Into<String>, value: impl Into<Value>) -> Self {
+    pub fn any_gte(attr: impl Into<String>, value: impl Serialize) -> Self {
         Self::AnyGte {
             attr: attr.into(),
-            value: value.into(),
+            value: to_json(value),
         }
     }
 
@@ -1617,7 +1684,7 @@ impl Filter {
     }
 
     /// Case insensitive version of `Glob`.
-    pub fn i_glob(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn iglob(attr: impl Into<String>, value: impl Into<String>) -> Self {
         Self::IGlob {
             attr: attr.into(),
             value: value.into(),
@@ -1625,7 +1692,7 @@ impl Filter {
     }
 
     /// Case insensitive version of `NotGlob`.
-    pub fn not_i_glob(attr: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn not_iglob(attr: impl Into<String>, value: impl Into<String>) -> Self {
         Self::NotIGlob {
             attr: attr.into(),
             value: value.into(),
@@ -1664,20 +1731,23 @@ impl Filter {
         Self::ContainsAllTokens {
             attr: attr.into(),
             value: value.into(),
+            params: None,
         }
     }
 
     /// Matches if all tokens in the input string are present in the attributes value. Requires that the
     /// attribute is configured for full-text search.
+    ///
+    /// Like [`Filter::contains_all_tokens`], with `params`.
     pub fn contains_all_tokens_with_params(
         attr: impl Into<String>,
         value: impl Into<FilterContainsAllTokensValue>,
         params: impl Into<ContainsAllTokensFilterParams>,
     ) -> Self {
-        Self::ContainsAllTokensWithParams {
+        Self::ContainsAllTokens {
             attr: attr.into(),
             value: value.into(),
-            params: params.into(),
+            params: Some(params.into()),
         }
     }
 
@@ -1690,20 +1760,23 @@ impl Filter {
         Self::ContainsAnyToken {
             attr: attr.into(),
             value: value.into(),
+            params: None,
         }
     }
 
     /// Matches if any of the tokens in the input string are present in the attribute value. Requires
     /// that the attribute is configured for full-text search.
+    ///
+    /// Like [`Filter::contains_any_token`], with `params`.
     pub fn contains_any_token_with_params(
         attr: impl Into<String>,
         value: impl Into<FilterContainsAnyTokenValue>,
         params: impl Into<ContainsAnyTokenFilterParams>,
     ) -> Self {
-        Self::ContainsAnyTokenWithParams {
+        Self::ContainsAnyToken {
             attr: attr.into(),
             value: value.into(),
-            params: params.into(),
+            params: Some(params.into()),
         }
     }
 
@@ -1773,21 +1846,25 @@ impl Serialize for Filter {
                 value,
                 params,
             } => (attr, "Fuzzy", value, params).serialize(serializer),
-            Self::ContainsAllTokens { attr, value } => {
-                (attr, "ContainsAllTokens", value).serialize(serializer)
-            }
-            Self::ContainsAllTokensWithParams {
+            Self::ContainsAllTokens {
                 attr,
                 value,
-                params,
+                params: None,
+            } => (attr, "ContainsAllTokens", value).serialize(serializer),
+            Self::ContainsAllTokens {
+                attr,
+                value,
+                params: Some(params),
             } => (attr, "ContainsAllTokens", value, params).serialize(serializer),
-            Self::ContainsAnyToken { attr, value } => {
-                (attr, "ContainsAnyToken", value).serialize(serializer)
-            }
-            Self::ContainsAnyTokenWithParams {
+            Self::ContainsAnyToken {
                 attr,
                 value,
-                params,
+                params: None,
+            } => (attr, "ContainsAnyToken", value).serialize(serializer),
+            Self::ContainsAnyToken {
+                attr,
+                value,
+                params: Some(params),
             } => (attr, "ContainsAnyToken", value, params).serialize(serializer),
             Self::ContainsTokenSequence { attr, value } => {
                 (attr, "ContainsTokenSequence", value).serialize(serializer)
@@ -1963,31 +2040,28 @@ impl<'de> Deserialize<'de> for Filter {
                 });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAllTokens")]) {
-            if let (Some(attr), Some(value)) =
-                (decode_element(&elements[0]), decode_element(&elements[2]))
-            {
-                return Ok(Self::ContainsAllTokens { attr, value });
-            }
-        }
         if let Some(elements) = tuple_elements(&value, 4, &[(1, "ContainsAllTokens")]) {
             if let (Some(attr), Some(value), Some(params)) = (
                 decode_element(&elements[0]),
                 decode_element(&elements[2]),
                 decode_element(&elements[3]),
             ) {
-                return Ok(Self::ContainsAllTokensWithParams {
+                return Ok(Self::ContainsAllTokens {
                     attr,
                     value,
-                    params,
+                    params: Some(params),
                 });
             }
         }
-        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAnyToken")]) {
+        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAllTokens")]) {
             if let (Some(attr), Some(value)) =
                 (decode_element(&elements[0]), decode_element(&elements[2]))
             {
-                return Ok(Self::ContainsAnyToken { attr, value });
+                return Ok(Self::ContainsAllTokens {
+                    attr,
+                    value,
+                    params: None,
+                });
             }
         }
         if let Some(elements) = tuple_elements(&value, 4, &[(1, "ContainsAnyToken")]) {
@@ -1996,10 +2070,21 @@ impl<'de> Deserialize<'de> for Filter {
                 decode_element(&elements[2]),
                 decode_element(&elements[3]),
             ) {
-                return Ok(Self::ContainsAnyTokenWithParams {
+                return Ok(Self::ContainsAnyToken {
                     attr,
                     value,
-                    params,
+                    params: Some(params),
+                });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 3, &[(1, "ContainsAnyToken")]) {
+            if let (Some(attr), Some(value)) =
+                (decode_element(&elements[0]), decode_element(&elements[2]))
+            {
+                return Ok(Self::ContainsAnyToken {
+                    attr,
+                    value,
+                    params: None,
                 });
             }
         }
@@ -2031,7 +2116,7 @@ impl<'de> Deserialize<'de> for Filter {
 
 impl From<Filter> for Value {
     fn from(value: Filter) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -2079,7 +2164,7 @@ pub struct FuzzyMaxEditDistance {
 
 impl FuzzyMaxEditDistance {
     /// Creates a new [`FuzzyMaxEditDistance`] from its required fields.
-    pub fn new(distance: u64, min_query_chars: u64) -> Self {
+    pub fn new(min_query_chars: u64, distance: u64) -> Self {
         Self {
             distance,
             min_query_chars,
@@ -2179,6 +2264,33 @@ impl<const N: usize> From<[&str; N]> for FilterContainsAllTokensValue {
     }
 }
 
+impl From<FilterContainsAnyTokenValue> for FilterContainsAllTokensValue {
+    fn from(value: FilterContainsAnyTokenValue) -> Self {
+        match value {
+            FilterContainsAnyTokenValue::String(value) => Self::String(value),
+            FilterContainsAnyTokenValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<FilterContainsTokenSequenceValue> for FilterContainsAllTokensValue {
+    fn from(value: FilterContainsTokenSequenceValue) -> Self {
+        match value {
+            FilterContainsTokenSequenceValue::String(value) => Self::String(value),
+            FilterContainsTokenSequenceValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<RankByTextBm25Value> for FilterContainsAllTokensValue {
+    fn from(value: RankByTextBm25Value) -> Self {
+        match value {
+            RankByTextBm25Value::String(value) => Self::String(value),
+            RankByTextBm25Value::Array(value) => Self::Array(value),
+        }
+    }
+}
+
 /// One of the shapes `ContainsAnyToken` accepts for its `value`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -2224,6 +2336,33 @@ impl From<&[&str]> for FilterContainsAnyTokenValue {
 impl<const N: usize> From<[&str; N]> for FilterContainsAnyTokenValue {
     fn from(value: [&str; N]) -> Self {
         Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<FilterContainsAllTokensValue> for FilterContainsAnyTokenValue {
+    fn from(value: FilterContainsAllTokensValue) -> Self {
+        match value {
+            FilterContainsAllTokensValue::String(value) => Self::String(value),
+            FilterContainsAllTokensValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<FilterContainsTokenSequenceValue> for FilterContainsAnyTokenValue {
+    fn from(value: FilterContainsTokenSequenceValue) -> Self {
+        match value {
+            FilterContainsTokenSequenceValue::String(value) => Self::String(value),
+            FilterContainsTokenSequenceValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<RankByTextBm25Value> for FilterContainsAnyTokenValue {
+    fn from(value: RankByTextBm25Value) -> Self {
+        match value {
+            RankByTextBm25Value::String(value) => Self::String(value),
+            RankByTextBm25Value::Array(value) => Self::Array(value),
+        }
     }
 }
 
@@ -2275,6 +2414,33 @@ impl<const N: usize> From<[&str; N]> for FilterContainsTokenSequenceValue {
     }
 }
 
+impl From<FilterContainsAllTokensValue> for FilterContainsTokenSequenceValue {
+    fn from(value: FilterContainsAllTokensValue) -> Self {
+        match value {
+            FilterContainsAllTokensValue::String(value) => Self::String(value),
+            FilterContainsAllTokensValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<FilterContainsAnyTokenValue> for FilterContainsTokenSequenceValue {
+    fn from(value: FilterContainsAnyTokenValue) -> Self {
+        match value {
+            FilterContainsAnyTokenValue::String(value) => Self::String(value),
+            FilterContainsAnyTokenValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<RankByTextBm25Value> for FilterContainsTokenSequenceValue {
+    fn from(value: RankByTextBm25Value) -> Self {
+        match value {
+            RankByTextBm25Value::String(value) => Self::String(value),
+            RankByTextBm25Value::Array(value) => Self::Array(value),
+        }
+    }
+}
+
 /// Additional parameters for the Saturate operator.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
@@ -2300,8 +2466,8 @@ impl SaturateParams {
     }
 
     /// The midpoint of the Saturate operator.
-    pub fn midpoint(mut self, midpoint: impl Into<Value>) -> Self {
-        self.midpoint = Some(midpoint.into());
+    pub fn midpoint(mut self, midpoint: impl Serialize) -> Self {
+        self.midpoint = Some(to_json(midpoint));
         self
     }
 }
@@ -2331,8 +2497,8 @@ impl DecayParams {
     }
 
     /// The midpoint of the Decay operator.
-    pub fn midpoint(mut self, midpoint: impl Into<Value>) -> Self {
-        self.midpoint = Some(midpoint.into());
+    pub fn midpoint(mut self, midpoint: impl Serialize) -> Self {
+        self.midpoint = Some(to_json(midpoint));
         self
     }
 }
@@ -2382,6 +2548,33 @@ impl From<&[&str]> for RankByTextBm25Value {
 impl<const N: usize> From<[&str; N]> for RankByTextBm25Value {
     fn from(value: [&str; N]) -> Self {
         Self::Array(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<FilterContainsAllTokensValue> for RankByTextBm25Value {
+    fn from(value: FilterContainsAllTokensValue) -> Self {
+        match value {
+            FilterContainsAllTokensValue::String(value) => Self::String(value),
+            FilterContainsAllTokensValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<FilterContainsAnyTokenValue> for RankByTextBm25Value {
+    fn from(value: FilterContainsAnyTokenValue) -> Self {
+        match value {
+            FilterContainsAnyTokenValue::String(value) => Self::String(value),
+            FilterContainsAnyTokenValue::Array(value) => Self::Array(value),
+        }
+    }
+}
+
+impl From<FilterContainsTokenSequenceValue> for RankByTextBm25Value {
+    fn from(value: FilterContainsTokenSequenceValue) -> Self {
+        match value {
+            FilterContainsTokenSequenceValue::String(value) => Self::String(value),
+            FilterContainsTokenSequenceValue::Array(value) => Self::Array(value),
+        }
     }
 }
 
@@ -2440,7 +2633,7 @@ impl<'de> Deserialize<'de> for RankByAttribute {
 
 impl From<RankByAttribute> for Value {
     fn from(value: RankByAttribute) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -2555,6 +2748,16 @@ impl From<Expr> for RankByAnnValue {
     }
 }
 
+impl From<RankByKnnValue> for RankByAnnValue {
+    fn from(value: RankByKnnValue) -> Self {
+        match value {
+            RankByKnnValue::Vector(value) => Self::Vector(value),
+            RankByKnnValue::Multi(value) => Self::Multi(value),
+            RankByKnnValue::Expr(value) => Self::Expr(value),
+        }
+    }
+}
+
 /// One of the shapes `kNN` accepts for its `value`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -2617,6 +2820,16 @@ impl From<Expr> for RankByKnnValue {
     }
 }
 
+impl From<RankByAnnValue> for RankByKnnValue {
+    fn from(value: RankByAnnValue) -> Self {
+        match value {
+            RankByAnnValue::Vector(value) => Self::Vector(value),
+            RankByAnnValue::Multi(value) => Self::Multi(value),
+            RankByAnnValue::Expr(value) => Self::Expr(value),
+        }
+    }
+}
+
 /// The consistency level for a query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
@@ -2636,6 +2849,12 @@ impl QueryConfigConsistency {
     pub fn level(mut self, level: impl Into<QueryConfigConsistencyLevel>) -> Self {
         self.level = Some(level.into());
         self
+    }
+}
+
+impl From<QueryConfigConsistencyLevel> for QueryConfigConsistency {
+    fn from(value: QueryConfigConsistencyLevel) -> Self {
+        Self::new().level(value)
     }
 }
 
@@ -2821,7 +3040,7 @@ impl<'de> Deserialize<'de> for GroupBy {
 
 impl From<GroupBy> for Value {
     fn from(value: GroupBy) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -2875,7 +3094,7 @@ impl<'de> Deserialize<'de> for GroupByFunction {
 
 impl From<GroupByFunction> for Value {
     fn from(value: GroupByFunction) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -3049,19 +3268,33 @@ impl From<String> for VectorEncoding {
 /// The response to a successful query explain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
-pub struct NamespaceExplainQueryResponse {
+pub struct ExplainQueryResponse {
     /// The textual representation of the query plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_text: Option<String>,
 }
 
 /// The response to a successful cache warm request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct NamespaceHintCacheWarmResponse {
+pub struct HintCacheWarmResponse {
+    /// The status of the request.
+    ///
+    /// Always `"ACCEPTED"`.
+    #[serde(default)]
+    pub status: String,
     /// A message describing the result of the request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+impl Default for HintCacheWarmResponse {
+    fn default() -> Self {
+        Self {
+            status: "ACCEPTED".to_owned(),
+            message: Default::default(),
+        }
+    }
 }
 
 /// Metadata about a namespace.
@@ -3238,6 +3471,12 @@ impl AttributeSchemaConfig {
     }
 }
 
+impl From<AttributeType> for AttributeSchemaConfig {
+    fn from(value: AttributeType) -> Self {
+        Self::new(value)
+    }
+}
+
 /// The data type of the attribute. Valid values: string, int, uint, float, uuid, datetime, bool,
 /// \[\]string, \[\]int, \[\]uint, \[\]float, \[\]uuid, \[\]datetime, \[\]bool, \[DIMS\]f16,
 /// \[DIMS\]f32, {}f16.
@@ -3381,6 +3620,18 @@ impl AttributeEmbedConfig {
     pub fn dims(mut self, dims: u64) -> Self {
         self.dims = Some(dims);
         self
+    }
+}
+
+impl From<String> for AttributeEmbedConfig {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for AttributeEmbedConfig {
+    fn from(value: &str) -> Self {
+        Self::new(value)
     }
 }
 
@@ -3731,6 +3982,12 @@ impl SparseKnn {
     }
 }
 
+impl From<SparseDistanceMetric> for SparseKnn {
+    fn from(value: SparseDistanceMetric) -> Self {
+        Self::new(value)
+    }
+}
+
 /// A function used to calculate sparse vector similarity.
 ///
 /// Converts from strings with [`From`], mapping values this version of the SDK doesn't know about to
@@ -3874,31 +4131,33 @@ impl Query {
     }
 
     /// Aggregations to compute over all documents in the namespace that match the filters.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn aggregate_by(
         mut self,
         aggregate_by: impl IntoIterator<Item = (impl Into<String>, impl Into<AggregateBy>)>,
     ) -> Self {
-        self.aggregate_by = Some(
-            aggregate_by
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.aggregate_by
+            .get_or_insert_with(Default::default)
+            .extend(aggregate_by.into_iter().map(|(k, v)| (k.into(), v.into())));
         self
     }
 
     /// Computes additional values on documents returned by a query. Each key is the name of the
     /// computed attribute; each value is an expression describing how to compute it.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
     pub fn compute_attributes(
         mut self,
         compute_attributes: impl IntoIterator<Item = (impl Into<String>, impl Into<Expr>)>,
     ) -> Self {
-        self.compute_attributes = Some(
-            compute_attributes
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.compute_attributes
+            .get_or_insert_with(Default::default)
+            .extend(
+                compute_attributes
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into())),
+            );
         self
     }
 
@@ -3910,11 +4169,15 @@ impl Query {
 
     /// List of attribute names to exclude from the response. All other attributes will be included in
     /// the response.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn exclude_attributes(
         mut self,
         exclude_attributes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        self.exclude_attributes = Some(exclude_attributes.into_iter().map(Into::into).collect());
+        self.exclude_attributes
+            .get_or_insert_with(Default::default)
+            .extend(exclude_attributes.into_iter().map(Into::into));
         self
     }
 
@@ -3926,14 +4189,28 @@ impl Query {
 
     /// Groups documents by the specified attributes (the "group key") before computing aggregates.
     /// Aggregates are computed separately for each group.
+    ///
+    /// Adds to any items already set, rather than replacing them.
     pub fn group_by(mut self, group_by: impl IntoIterator<Item = impl Into<GroupBy>>) -> Self {
-        self.group_by = Some(group_by.into_iter().map(Into::into).collect());
+        self.group_by
+            .get_or_insert_with(Default::default)
+            .extend(group_by.into_iter().map(Into::into));
         self
     }
 
     /// Whether to include attributes in the response.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn include_attributes(mut self, include_attributes: impl Into<IncludeAttributes>) -> Self {
-        self.include_attributes = Some(include_attributes.into());
+        self.include_attributes = Some(
+            match (self.include_attributes.take(), include_attributes.into()) {
+                (Some(IncludeAttributes::Array(mut existing)), IncludeAttributes::Array(more)) => {
+                    existing.extend(more);
+                    IncludeAttributes::Array(existing)
+                }
+                (_, value) => value,
+            },
+        );
         self
     }
 
@@ -3960,6 +4237,12 @@ impl Query {
     pub fn top_k(mut self, top_k: u64) -> Self {
         self.top_k = Some(top_k);
         self
+    }
+}
+
+impl From<&Query> for Query {
+    fn from(value: &Query) -> Self {
+        value.clone()
     }
 }
 
@@ -4006,16 +4289,14 @@ impl RerankLimit {
 /// RRF or a reranking model.
 ///
 /// Serialized as JSON arrays (tuples) and constructed with the associated functions, e.g.
-/// [`RerankBy::rrf_with_params`].
+/// [`RerankBy::rrf`].
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum RerankBy {
     /// Rerank with RRF.
-    Rrf,
-    /// Rerank with RRF.
-    RrfWithParams {
+    Rrf {
         /// Configuration options for RRF.
-        item1: RrfParams,
+        params: Option<RrfParams>,
     },
     /// Rerank retrieved candidates with a model.
     Model(RerankModelParams),
@@ -4024,9 +4305,16 @@ pub enum RerankBy {
 #[allow(deprecated)]
 impl RerankBy {
     /// Rerank with RRF.
-    pub fn rrf_with_params(item1: impl Into<RrfParams>) -> Self {
-        Self::RrfWithParams {
-            item1: item1.into(),
+    pub fn rrf() -> Self {
+        Self::Rrf { params: None }
+    }
+
+    /// Rerank with RRF.
+    ///
+    /// Like [`RerankBy::rrf`], with `params`.
+    pub fn rrf_with_params(params: impl Into<RrfParams>) -> Self {
+        Self::Rrf {
+            params: Some(params.into()),
         }
     }
 
@@ -4046,8 +4334,10 @@ impl From<RerankModelParams> for RerankBy {
 impl Serialize for RerankBy {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Rrf => ("RRF",).serialize(serializer),
-            Self::RrfWithParams { item1 } => ("RRF", item1).serialize(serializer),
+            Self::Rrf { params: None } => ("RRF",).serialize(serializer),
+            Self::Rrf {
+                params: Some(params),
+            } => ("RRF", params).serialize(serializer),
             Self::Model(value) => value.serialize(serializer),
         }
     }
@@ -4057,13 +4347,15 @@ impl Serialize for RerankBy {
 impl<'de> Deserialize<'de> for RerankBy {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        if tuple_elements(&value, 1, &[(0, "RRF")]).is_some() {
-            return Ok(Self::Rrf);
-        }
         if let Some(elements) = tuple_elements(&value, 2, &[(0, "RRF")]) {
-            if let Some(item1) = decode_element(&elements[1]) {
-                return Ok(Self::RrfWithParams { item1 });
+            if let Some(params) = decode_element(&elements[1]) {
+                return Ok(Self::Rrf {
+                    params: Some(params),
+                });
             }
+        }
+        if tuple_elements(&value, 1, &[(0, "RRF")]).is_some() {
+            return Ok(Self::Rrf { params: None });
         }
         if let Some(value) = decode_element(&value) {
             return Ok(Self::Model(value));
@@ -4076,7 +4368,7 @@ impl<'de> Deserialize<'de> for RerankBy {
 
 impl From<RerankBy> for Value {
     fn from(value: RerankBy) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -4128,8 +4420,8 @@ pub struct RerankModelParams {
 impl RerankModelParams {
     /// Creates a new [`RerankModelParams`] from its required fields.
     pub fn new(
-        attribute: impl Into<String>,
         model: impl Into<String>,
+        attribute: impl Into<String>,
         query: impl Into<String>,
     ) -> Self {
         Self {
@@ -4142,7 +4434,7 @@ impl RerankModelParams {
 
 impl From<RerankModelParams> for Value {
     fn from(value: RerankModelParams) -> Self {
-        expression_to_json(value)
+        to_json(value)
     }
 }
 
@@ -4235,8 +4527,28 @@ impl Row {
     }
 
     /// Sets a property not covered by the fields of this type.
-    pub fn insert(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
-        self.extra.insert(key.into(), value.into());
+    ///
+    /// `id` and `vector` are fields of this type, so they're set on those fields instead.
+    pub fn insert(mut self, key: impl Into<String>, value: impl Serialize) -> Self {
+        let key = key.into();
+        let value = to_json(value);
+        match key.as_str() {
+            "id" => match <Id as Deserialize>::deserialize(&value) {
+                Ok(field) => self.id = field,
+                Err(_) => {
+                    self.extra.insert(key, value);
+                }
+            },
+            "vector" => match <Vector as Deserialize>::deserialize(&value) {
+                Ok(field) => self.vector = Some(field),
+                Err(_) => {
+                    self.extra.insert(key, value);
+                }
+            },
+            _ => {
+                self.extra.insert(key, value);
+            }
+        }
         self
     }
 
@@ -4257,6 +4569,12 @@ impl Row {
     /// Returns a property not covered by the fields of this type.
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.extra.get(key)
+    }
+}
+
+impl From<&Row> for Row {
+    fn from(value: &Row) -> Self {
+        value.clone()
     }
 }
 
@@ -4398,6 +4716,11 @@ pub struct OperationError {
 pub struct ErrorResponse {
     /// The error message.
     pub error: String,
+    /// The status of the request.
+    ///
+    /// Always `"error"`.
+    #[serde(default)]
+    pub status: String,
 }
 
 /// The result of a query. With `aggregate_by`, `aggregations` maps each aggregation's label to its
@@ -4423,7 +4746,7 @@ pub struct QueryResult {
 /// The response to a successful cache warm request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct NamespaceRecallResponse {
+pub struct RecallResponse {
     /// The average number of documents retrieved by the approximate nearest neighbor searches.
     pub avg_ann_count: f64,
     /// The average number of documents retrieved by the exhaustive searches.
@@ -4450,12 +4773,12 @@ pub struct NamespaceRecallResponseGroundTruth {
 }
 
 /// The response to a successful namespace schema request.
-pub type NamespaceSchemaResponse = BTreeMap<String, AttributeSchemaConfig>;
+pub type SchemaResponse = BTreeMap<String, AttributeSchemaConfig>;
 
 /// The response to a successful request to start a copy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct NamespaceStartCopyFromResponse {
+pub struct StartCopyFromResponse {
     /// The token identifying the copy operation.
     pub token: String,
 }
@@ -4570,7 +4893,7 @@ impl AttributeSchemaDrop {
 }
 
 /// The updated schema for the namespace.
-pub type NamespaceUpdateSchemaResponse = BTreeMap<String, AttributeSchemaConfig>;
+pub type UpdateSchemaResponse = BTreeMap<String, AttributeSchemaConfig>;
 
 /// The namespace to create an instant, copy-on-write clone of.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4619,6 +4942,18 @@ impl BranchFromNamespaceConfig {
     }
 }
 
+impl From<String> for BranchFromNamespaceConfig {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for BranchFromNamespaceConfig {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
 /// The namespace to copy documents from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -4650,7 +4985,7 @@ impl From<CopyFromNamespaceConfig> for CopyFromNamespaceParams {
 }
 
 /// Configuration for copying documents from another namespace.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CopyFromNamespaceConfig {
     /// The namespace to copy documents from.
@@ -4686,6 +5021,31 @@ impl CopyFromNamespaceConfig {
     }
 }
 
+impl std::fmt::Debug for CopyFromNamespaceConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CopyFromNamespaceConfig")
+            .field("source_namespace", &self.source_namespace)
+            .field(
+                "source_api_key",
+                &self.source_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("source_region", &self.source_region)
+            .finish()
+    }
+}
+
+impl From<String> for CopyFromNamespaceConfig {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for CopyFromNamespaceConfig {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
 /// Sets the attributes in `patch` on every document that matches `filters`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -4698,14 +5058,14 @@ pub struct PatchByFilter {
 impl PatchByFilter {
     /// Creates a new [`PatchByFilter`] from its required fields.
     pub fn new(
+        patch: impl IntoIterator<Item = (impl Into<String>, impl Serialize)>,
         filters: impl Into<Filter>,
-        patch: impl IntoIterator<Item = (impl Into<String>, impl Into<Value>)>,
     ) -> Self {
         Self {
             filters: filters.into(),
             patch: patch
                 .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
+                .map(|(k, v)| (k.into(), to_json(v)))
                 .collect(),
         }
     }
@@ -4737,19 +5097,56 @@ impl Columns {
     }
 
     /// The vector embeddings of the documents.
+    ///
+    /// A list adds to a list already set, rather than replacing it.
     pub fn vector(mut self, vector: impl Into<ColumnsVector>) -> Self {
-        self.vector = Some(vector.into());
+        self.vector = Some(match (self.vector.take(), vector.into()) {
+            (Some(ColumnsVector::Array(mut existing)), ColumnsVector::Array(more)) => {
+                existing.extend(more);
+                ColumnsVector::Array(existing)
+            }
+            (_, value) => value,
+        });
         self
     }
 
     /// Sets a property not covered by the fields of this type.
+    ///
+    /// `id` and `vector` are fields of this type, so they're set on those fields instead.
     pub fn insert(
         mut self,
         key: impl Into<String>,
-        value: impl IntoIterator<Item = impl Into<Value>>,
+        value: impl IntoIterator<Item = impl Serialize>,
     ) -> Self {
-        self.extra
-            .insert(key.into(), value.into_iter().map(Into::into).collect());
+        let key = key.into();
+        let value = value.into_iter().map(to_json).collect::<Vec<_>>();
+        match key.as_str() {
+            "id" => {
+                let json = Value::Array(value);
+                match <Vec<Id> as Deserialize>::deserialize(&json) {
+                    Ok(field) => self.id = field,
+                    Err(_) => {
+                        if let Value::Array(value) = json {
+                            self.extra.insert(key, value);
+                        }
+                    }
+                }
+            }
+            "vector" => {
+                let json = Value::Array(value);
+                match <ColumnsVector as Deserialize>::deserialize(&json) {
+                    Ok(field) => self.vector = Some(field),
+                    Err(_) => {
+                        if let Value::Array(value) = json {
+                            self.extra.insert(key, value);
+                        }
+                    }
+                }
+            }
+            _ => {
+                self.extra.insert(key, value);
+            }
+        }
         self
     }
 
@@ -4858,11 +5255,11 @@ mod tests {
     #[allow(deprecated)]
     fn aggregate_by_round_trips() {
         let cases: Vec<(AggregateBy, Value)> = vec![
-            (AggregateBy::Count, json!(["Count"])),
-            (AggregateBy::sum("string"), json!(["Sum", "string"])),
+            (AggregateBy::count(), json!(["Count"])),
+            (AggregateBy::sum("attr"), json!(["Sum", "attr"])),
             (
-                AggregateBy::count_deprecated("string"),
-                json!(["Count", "string"]),
+                AggregateBy::count_deprecated("attr"),
+                json!(["Count", "attr"]),
             ),
         ];
         for (value, expected) in cases {
@@ -4878,26 +5275,26 @@ mod tests {
     fn expr_round_trips() {
         let cases: Vec<(Expr, Value)> = vec![
             (
-                Expr::ref_new(ExprRefNew::new("string")),
-                json!({"$ref_new":"string"}),
-            ),
-            (Expr::embed("string"), json!(["Embed", "string"])),
-            (
-                Expr::embed_with_params("string", EmbedParams::new()),
-                json!(["Embed", "string", {}]),
+                Expr::ref_new(ExprRefNew::new("$ref_new")),
+                json!({"$ref_new":"$ref_new"}),
             ),
             (
-                Expr::vector_dist("string", [0.5]),
-                json!(["string", "VectorDist", [0.5]]),
+                Expr::embed_with_params("value", EmbedParams::new()),
+                json!(["Embed", "value", {}]),
             ),
-            (Expr::highlight("string"), json!(["Highlight", "string"])),
+            (Expr::embed("value"), json!(["Embed", "value"])),
             (
-                Expr::highlight_with_config("string", HighlightConfigParams::new()),
-                json!(["Highlight", "string", {}]),
+                Expr::vector_dist("attr", [0.5]),
+                json!(["attr", "VectorDist", [0.5]]),
             ),
             (
-                Expr::score(RankBy::ann("string", [0.5])),
-                json!(["string", "ANN", [0.5]]),
+                Expr::highlight_with_config("attr", HighlightConfigParams::new()),
+                json!(["Highlight", "attr", {}]),
+            ),
+            (Expr::highlight("attr"), json!(["Highlight", "attr"])),
+            (
+                Expr::score(RankBy::ann("attr", [0.5])),
+                json!(["attr", "ANN", [0.5]]),
             ),
         ];
         for (value, expected) in cases {
@@ -4912,45 +5309,43 @@ mod tests {
     #[allow(deprecated)]
     fn rank_by_round_trips() {
         let cases: Vec<(RankBy, Value)> = vec![
+            (RankBy::ann("attr", [0.5]), json!(["attr", "ANN", [0.5]])),
             (
-                RankBy::ann("string", [0.5]),
-                json!(["string", "ANN", [0.5]]),
+                RankBy::ann("attr", [vec![0.5]]),
+                json!(["attr", "ANN", [[0.5]]]),
             ),
             (
-                RankBy::ann("string", [vec![0.5]]),
-                json!(["string", "ANN", [[0.5]]]),
+                RankBy::ann("attr", Expr::embed_with_params("value", EmbedParams::new())),
+                json!(["attr", "ANN", ["Embed", "value", {}]]),
+            ),
+            (RankBy::knn("attr", [0.5]), json!(["attr", "kNN", [0.5]])),
+            (
+                RankBy::knn("attr", [vec![0.5]]),
+                json!(["attr", "kNN", [[0.5]]]),
             ),
             (
-                RankBy::ann("string", Expr::embed("string")),
-                json!(["string", "ANN", ["Embed", "string"]]),
+                RankBy::knn("attr", Expr::embed_with_params("value", EmbedParams::new())),
+                json!(["attr", "kNN", ["Embed", "value", {}]]),
             ),
             (
-                RankBy::knn("string", [0.5]),
-                json!(["string", "kNN", [0.5]]),
+                RankBy::sparse_knn("attr", [("key", 0.5)]),
+                json!(["attr","SparseKNN",{"key":0.5}]),
             ),
             (
-                RankBy::knn("string", [vec![0.5]]),
-                json!(["string", "kNN", [[0.5]]]),
+                RankBy::text(RankByText::bm25_with_params(
+                    "attr",
+                    "string",
+                    Bm25ClauseParams::new(),
+                )),
+                json!(["attr", "BM25", "string", {}]),
             ),
             (
-                RankBy::knn("string", Expr::embed("string")),
-                json!(["string", "kNN", ["Embed", "string"]]),
+                RankBy::attribute("attr", RankByAttributeOrder::Asc),
+                json!(["attr", "asc"]),
             ),
             (
-                RankBy::sparse_knn("string", [("key", 0.5)]),
-                json!(["string","SparseKNN",{"key":0.5}]),
-            ),
-            (
-                RankBy::text(RankByText::bm25("string", "string")),
-                json!(["string", "BM25", "string"]),
-            ),
-            (
-                RankBy::attribute("string", RankByAttributeOrder::Asc),
-                json!(["string", "asc"]),
-            ),
-            (
-                RankBy::attributes([RankByAttribute::new("string", RankByAttributeOrder::Asc)]),
-                json!([["string", "asc"]]),
+                RankBy::attributes([RankByAttribute::new("attr", RankByAttributeOrder::Asc)]),
+                json!([["attr", "asc"]]),
             ),
         ];
         for (value, expected) in cases {
@@ -4966,52 +5361,69 @@ mod tests {
     fn rank_by_text_round_trips() {
         let cases: Vec<(RankByText, Value)> = vec![
             (
-                RankByText::bm25("string", "string"),
-                json!(["string", "BM25", "string"]),
+                RankByText::bm25_with_params("attr", "string", Bm25ClauseParams::new()),
+                json!(["attr", "BM25", "string", {}]),
             ),
             (
-                RankByText::bm25("string", ["string"]),
-                json!(["string", "BM25", ["string"]]),
+                RankByText::bm25_with_params("attr", ["string"], Bm25ClauseParams::new()),
+                json!(["attr", "BM25", ["string"], {}]),
             ),
             (
-                RankByText::bm25_with_params("string", "string", Bm25ClauseParams::new()),
-                json!(["string", "BM25", "string", {}]),
+                RankByText::bm25("attr", "string"),
+                json!(["attr", "BM25", "string"]),
             ),
             (
-                RankByText::bm25_with_params("string", ["string"], Bm25ClauseParams::new()),
-                json!(["string", "BM25", ["string"], {}]),
+                RankByText::bm25("attr", ["string"]),
+                json!(["attr", "BM25", ["string"]]),
             ),
             (
-                RankByText::sum([RankByText::bm25("string", "string")]),
-                json!(["Sum", [["string", "BM25", "string"]]]),
+                RankByText::sum([RankByText::bm25_with_params(
+                    "attr",
+                    "string",
+                    Bm25ClauseParams::new(),
+                )]),
+                json!(["Sum", [["attr", "BM25", "string", {}]]]),
             ),
             (
-                RankByText::max([RankByText::bm25("string", "string")]),
-                json!(["Max", [["string", "BM25", "string"]]]),
+                RankByText::max([RankByText::bm25_with_params(
+                    "attr",
+                    "string",
+                    Bm25ClauseParams::new(),
+                )]),
+                json!(["Max", [["attr", "BM25", "string", {}]]]),
             ),
             (
-                RankByText::product(0.5, RankByText::bm25("string", "string")),
-                json!(["Product", 0.5, ["string", "BM25", "string"]]),
+                RankByText::product(
+                    0.25,
+                    RankByText::bm25_with_params("attr", "string", Bm25ClauseParams::new()),
+                ),
+                json!(["Product", 0.25, ["attr", "BM25", "string", {}]]),
             ),
             (
-                RankByText::filter(Filter::eq("string", "value")),
-                json!(["string", "Eq", "value"]),
+                RankByText::filter(Filter::eq("attr", "value")),
+                json!(["attr", "Eq", "value"]),
+            ),
+            (RankByText::attribute("attr"), json!(["Attribute", "attr"])),
+            (
+                RankByText::saturate(
+                    RankByText::bm25_with_params("attr", "string", Bm25ClauseParams::new()),
+                    SaturateParams::new(),
+                ),
+                json!(["Saturate", ["attr", "BM25", "string", {}], {}]),
             ),
             (
-                RankByText::attribute("string"),
-                json!(["Attribute", "string"]),
+                RankByText::decay(
+                    RankByText::bm25_with_params("attr", "string", Bm25ClauseParams::new()),
+                    DecayParams::new(),
+                ),
+                json!(["Decay", ["attr", "BM25", "string", {}], {}]),
             ),
             (
-                RankByText::saturate(RankByText::bm25("string", "string"), SaturateParams::new()),
-                json!(["Saturate", ["string", "BM25", "string"], {}]),
-            ),
-            (
-                RankByText::decay(RankByText::bm25("string", "string"), DecayParams::new()),
-                json!(["Decay", ["string", "BM25", "string"], {}]),
-            ),
-            (
-                RankByText::dist(RankByText::bm25("string", "string"), "value"),
-                json!(["Dist", ["string", "BM25", "string"], "value"]),
+                RankByText::dist(
+                    RankByText::bm25_with_params("attr", "string", Bm25ClauseParams::new()),
+                    "value",
+                ),
+                json!(["Dist", ["attr", "BM25", "string", {}], "value"]),
             ),
         ];
         for (value, expected) in cases {
@@ -5026,165 +5438,156 @@ mod tests {
     #[allow(deprecated)]
     fn filter_round_trips() {
         let cases: Vec<(Filter, Value)> = vec![
+            (Filter::eq("attr", "value"), json!(["attr", "Eq", "value"])),
             (
-                Filter::eq("string", "value"),
-                json!(["string", "Eq", "value"]),
+                Filter::not_eq("attr", "value"),
+                json!(["attr", "NotEq", "value"]),
             ),
             (
-                Filter::not_eq("string", "value"),
-                json!(["string", "NotEq", "value"]),
+                Filter::in_("attr", ["value"]),
+                json!(["attr", "In", ["value"]]),
             ),
             (
-                Filter::in_("string", ["value"]),
-                json!(["string", "In", ["value"]]),
+                Filter::not_in("attr", ["value"]),
+                json!(["attr", "NotIn", ["value"]]),
             ),
             (
-                Filter::not_in("string", ["value"]),
-                json!(["string", "NotIn", ["value"]]),
+                Filter::contains("attr", "value"),
+                json!(["attr", "Contains", "value"]),
             ),
             (
-                Filter::contains("string", "value"),
-                json!(["string", "Contains", "value"]),
+                Filter::not_contains("attr", "value"),
+                json!(["attr", "NotContains", "value"]),
             ),
             (
-                Filter::not_contains("string", "value"),
-                json!(["string", "NotContains", "value"]),
+                Filter::contains_any("attr", ["value"]),
+                json!(["attr", "ContainsAny", ["value"]]),
             ),
             (
-                Filter::contains_any("string", ["value"]),
-                json!(["string", "ContainsAny", ["value"]]),
+                Filter::not_contains_any("attr", ["value"]),
+                json!(["attr", "NotContainsAny", ["value"]]),
+            ),
+            (Filter::lt("attr", "value"), json!(["attr", "Lt", "value"])),
+            (
+                Filter::lte("attr", "value"),
+                json!(["attr", "Lte", "value"]),
+            ),
+            (Filter::gt("attr", "value"), json!(["attr", "Gt", "value"])),
+            (
+                Filter::gte("attr", "value"),
+                json!(["attr", "Gte", "value"]),
             ),
             (
-                Filter::not_contains_any("string", ["value"]),
-                json!(["string", "NotContainsAny", ["value"]]),
+                Filter::any_lt("attr", "value"),
+                json!(["attr", "AnyLt", "value"]),
             ),
             (
-                Filter::lt("string", "value"),
-                json!(["string", "Lt", "value"]),
+                Filter::any_lte("attr", "value"),
+                json!(["attr", "AnyLte", "value"]),
             ),
             (
-                Filter::lte("string", "value"),
-                json!(["string", "Lte", "value"]),
+                Filter::any_gt("attr", "value"),
+                json!(["attr", "AnyGt", "value"]),
             ),
             (
-                Filter::gt("string", "value"),
-                json!(["string", "Gt", "value"]),
+                Filter::any_gte("attr", "value"),
+                json!(["attr", "AnyGte", "value"]),
             ),
             (
-                Filter::gte("string", "value"),
-                json!(["string", "Gte", "value"]),
+                Filter::glob("attr", "value"),
+                json!(["attr", "Glob", "value"]),
             ),
             (
-                Filter::any_lt("string", "value"),
-                json!(["string", "AnyLt", "value"]),
+                Filter::not_glob("attr", "value"),
+                json!(["attr", "NotGlob", "value"]),
             ),
             (
-                Filter::any_lte("string", "value"),
-                json!(["string", "AnyLte", "value"]),
+                Filter::iglob("attr", "value"),
+                json!(["attr", "IGlob", "value"]),
             ),
             (
-                Filter::any_gt("string", "value"),
-                json!(["string", "AnyGt", "value"]),
+                Filter::not_iglob("attr", "value"),
+                json!(["attr", "NotIGlob", "value"]),
             ),
             (
-                Filter::any_gte("string", "value"),
-                json!(["string", "AnyGte", "value"]),
-            ),
-            (
-                Filter::glob("string", "string"),
-                json!(["string", "Glob", "string"]),
-            ),
-            (
-                Filter::not_glob("string", "string"),
-                json!(["string", "NotGlob", "string"]),
-            ),
-            (
-                Filter::i_glob("string", "string"),
-                json!(["string", "IGlob", "string"]),
-            ),
-            (
-                Filter::not_i_glob("string", "string"),
-                json!(["string", "NotIGlob", "string"]),
-            ),
-            (
-                Filter::regex("string", "string"),
-                json!(["string", "Regex", "string"]),
+                Filter::regex("attr", "value"),
+                json!(["attr", "Regex", "value"]),
             ),
             (
                 Filter::fuzzy(
-                    "string",
-                    "string",
-                    FuzzyParams::new([FuzzyMaxEditDistance::new(3, 3)]),
+                    "attr",
+                    "value",
+                    FuzzyParams::new([FuzzyMaxEditDistance::new(4, 3)]),
                 ),
-                json!(["string","Fuzzy","string",{"max_edit_distance":[{"distance":3,"min_query_chars":3}]}]),
-            ),
-            (
-                Filter::contains_all_tokens("string", "string"),
-                json!(["string", "ContainsAllTokens", "string"]),
-            ),
-            (
-                Filter::contains_all_tokens("string", ["string"]),
-                json!(["string", "ContainsAllTokens", ["string"]]),
+                json!(["attr","Fuzzy","value",{"max_edit_distance":[{"distance":3,"min_query_chars":4}]}]),
             ),
             (
                 Filter::contains_all_tokens_with_params(
-                    "string",
+                    "attr",
                     "string",
                     ContainsAllTokensFilterParams::new(),
                 ),
-                json!(["string", "ContainsAllTokens", "string", {}]),
+                json!(["attr", "ContainsAllTokens", "string", {}]),
             ),
             (
                 Filter::contains_all_tokens_with_params(
-                    "string",
+                    "attr",
                     ["string"],
                     ContainsAllTokensFilterParams::new(),
                 ),
-                json!(["string", "ContainsAllTokens", ["string"], {}]),
+                json!(["attr", "ContainsAllTokens", ["string"], {}]),
             ),
             (
-                Filter::contains_any_token("string", "string"),
-                json!(["string", "ContainsAnyToken", "string"]),
+                Filter::contains_all_tokens("attr", "string"),
+                json!(["attr", "ContainsAllTokens", "string"]),
             ),
             (
-                Filter::contains_any_token("string", ["string"]),
-                json!(["string", "ContainsAnyToken", ["string"]]),
+                Filter::contains_all_tokens("attr", ["string"]),
+                json!(["attr", "ContainsAllTokens", ["string"]]),
             ),
             (
                 Filter::contains_any_token_with_params(
-                    "string",
+                    "attr",
                     "string",
                     ContainsAnyTokenFilterParams::new(),
                 ),
-                json!(["string", "ContainsAnyToken", "string", {}]),
+                json!(["attr", "ContainsAnyToken", "string", {}]),
             ),
             (
                 Filter::contains_any_token_with_params(
-                    "string",
+                    "attr",
                     ["string"],
                     ContainsAnyTokenFilterParams::new(),
                 ),
-                json!(["string", "ContainsAnyToken", ["string"], {}]),
+                json!(["attr", "ContainsAnyToken", ["string"], {}]),
             ),
             (
-                Filter::contains_token_sequence("string", "string"),
-                json!(["string", "ContainsTokenSequence", "string"]),
+                Filter::contains_any_token("attr", "string"),
+                json!(["attr", "ContainsAnyToken", "string"]),
             ),
             (
-                Filter::contains_token_sequence("string", ["string"]),
-                json!(["string", "ContainsTokenSequence", ["string"]]),
+                Filter::contains_any_token("attr", ["string"]),
+                json!(["attr", "ContainsAnyToken", ["string"]]),
             ),
             (
-                Filter::not(Filter::eq("string", "value")),
-                json!(["Not", ["string", "Eq", "value"]]),
+                Filter::contains_token_sequence("attr", "string"),
+                json!(["attr", "ContainsTokenSequence", "string"]),
             ),
             (
-                Filter::and([Filter::eq("string", "value")]),
-                json!(["And", [["string", "Eq", "value"]]]),
+                Filter::contains_token_sequence("attr", ["string"]),
+                json!(["attr", "ContainsTokenSequence", ["string"]]),
             ),
             (
-                Filter::or([Filter::eq("string", "value")]),
-                json!(["Or", [["string", "Eq", "value"]]]),
+                Filter::not(Filter::eq("attr", "value")),
+                json!(["Not", ["attr", "Eq", "value"]]),
+            ),
+            (
+                Filter::and([Filter::eq("attr", "value")]),
+                json!(["And", [["attr", "Eq", "value"]]]),
+            ),
+            (
+                Filter::or([Filter::eq("attr", "value")]),
+                json!(["Or", [["attr", "Eq", "value"]]]),
             ),
         ];
         for (value, expected) in cases {
@@ -5201,8 +5604,8 @@ mod tests {
         let cases: Vec<(GroupBy, Value)> = vec![
             (GroupBy::attr("string"), json!("string")),
             (
-                GroupBy::expr([("key", GroupByFunction::for_each_unique("string"))]),
-                json!({"key":["ForEachUnique","string"]}),
+                GroupBy::expr([("key", GroupByFunction::for_each_unique("attr"))]),
+                json!({"key":["ForEachUnique","attr"]}),
             ),
         ];
         for (value, expected) in cases {
@@ -5217,8 +5620,8 @@ mod tests {
     #[allow(deprecated)]
     fn group_by_function_round_trips() {
         let cases: Vec<(GroupByFunction, Value)> = vec![(
-            GroupByFunction::for_each_unique("string"),
-            json!(["ForEachUnique", "string"]),
+            GroupByFunction::for_each_unique("attr"),
+            json!(["ForEachUnique", "attr"]),
         )];
         for (value, expected) in cases {
             let json = serde_json::to_value(&value).unwrap();
@@ -5232,14 +5635,14 @@ mod tests {
     #[allow(deprecated)]
     fn rerank_by_round_trips() {
         let cases: Vec<(RerankBy, Value)> = vec![
-            (RerankBy::Rrf, json!(["RRF"])),
             (
                 RerankBy::rrf_with_params(RrfParams::new()),
                 json!(["RRF", {}]),
             ),
+            (RerankBy::rrf(), json!(["RRF"])),
             (
-                RerankBy::model(RerankModelParams::new("string", "string", "string")),
-                json!({"attribute":"string","model":"string","query":"string"}),
+                RerankBy::model(RerankModelParams::new("model", "attribute", "query")),
+                json!({"attribute":"attribute","model":"model","query":"query"}),
             ),
         ];
         for (value, expected) in cases {
