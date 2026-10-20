@@ -4,10 +4,14 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
+use reqwest::header::{
+    ACCEPT, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue,
+    USER_AGENT,
+};
 use reqwest::{Method, Response, StatusCode, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -18,6 +22,13 @@ use crate::observer::{Observation, RequestInfo};
 
 /// The longest `Retry-After` the client will honor. Longer values fall back to exponential backoff.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
+
+/// Whether clients using compression also gzip request bodies (larger than `MIN_GZIP_SIZE`). They don't, since many
+/// APIs don't accept gzipped bodies. APIs that do can change this with custom code.
+const GZIP_REQUEST_BODIES: bool = false;
+
+/// Request bodies larger than this are gzipped, if they're gzipped at all. Smaller ones aren't worth the CPU.
+const MIN_GZIP_SIZE: usize = 1024;
 
 /// Settings that can be overridden for a single request.
 #[derive(Debug, Clone, Default)]
@@ -226,12 +237,14 @@ impl Client {
         let max_retries = request.options.max_retries.unwrap_or(inner.max_retries);
         let timeout = request.options.timeout.unwrap_or(inner.timeout);
         let url = self.url(request)?;
+        // Compressed once, rather than for each attempt.
+        let body = self.encode_body(request);
 
         let mut attempt = 0;
         loop {
             observation.start_attempt(attempt);
             let result = match self
-                .request_builder(request, url.clone(), attempt, timeout)
+                .request_builder(request, body.as_ref(), url.clone(), attempt, timeout)
                 .build()
             {
                 Ok(mut http_request) => {
@@ -284,9 +297,34 @@ impl Client {
         Ok(url)
     }
 
+    /// A request's body as it's sent, and whether it's gzipped: it is when the API accepts gzipped bodies,
+    /// compression is on, and the body is large enough to be worth it.
+    fn encode_body(&self, request: &ApiRequest) -> Option<(Bytes, bool)> {
+        let body = request.body.as_ref()?;
+        if !GZIP_REQUEST_BODIES || !self.inner.compression || body.len() <= MIN_GZIP_SIZE {
+            return Some((body.clone(), false));
+        }
+        // Fast compression, like the other SDKs: most of the size reduction for a fraction of the CPU.
+        let mut encoder = flate2::write::GzEncoder::new(
+            Vec::with_capacity(body.len() / 4),
+            flate2::Compression::fast(),
+        );
+        encoder
+            .write_all(body)
+            .expect("gzipping into memory can't fail");
+        Some((
+            encoder
+                .finish()
+                .expect("gzipping into memory can't fail")
+                .into(),
+            true,
+        ))
+    }
+
     fn request_builder(
         &self,
         request: &ApiRequest,
+        body: Option<&(Bytes, bool)>,
         url: Url,
         attempt: u32,
         timeout: Duration,
@@ -317,10 +355,12 @@ impl Client {
             }
         }
         builder = builder.headers(overrides);
-        if let Some(body) = &request.body {
-            builder = builder
-                .header(CONTENT_TYPE, "application/json")
-                .body(body.clone());
+        if let Some((body, gzipped)) = body {
+            builder = builder.header(CONTENT_TYPE, "application/json");
+            if *gzipped {
+                builder = builder.header(CONTENT_ENCODING, "gzip");
+            }
+            builder = builder.body(body.clone());
         }
         builder
     }
@@ -339,9 +379,14 @@ impl Client {
 }
 
 /// Headers sent with every request.
-pub(crate) fn default_headers(stainless_headers: bool) -> HeaderMap {
+pub(crate) fn default_headers(stainless_headers: bool, compression: bool) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    // Without compression, ask for uncompressed responses: reqwest asks for gzip otherwise.
+    headers.insert(
+        ACCEPT_ENCODING,
+        HeaderValue::from_static(if compression { "gzip" } else { "identity" }),
+    );
     headers.insert(
         USER_AGENT,
         HeaderValue::from_static(concat!("Turbopuffer/Rust ", env!("CARGO_PKG_VERSION"))),
@@ -565,7 +610,32 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn decompresses_gzip_responses() {
+        async fn doesnt_compress_when_off() {
+            let server = MockServer::start().await;
+            Mock::given(path("/thing"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
+                .mount(&server)
+                .await;
+
+            let client = Client::for_tests(&server.uri());
+            let large = json!({ "text": "a".repeat(2 * crate::transport::MIN_GZIP_SIZE) });
+            let request = ApiRequest::new(reqwest::Method::POST, "/thing".to_owned())
+                .json(&large)
+                .unwrap();
+            let _: Value = client.execute(request).await.unwrap();
+
+            let received = &server.received_requests().await.unwrap()[0];
+            let header = |name: &str| received.headers.get(name).and_then(|v| v.to_str().ok());
+            assert_eq!(header("accept-encoding"), Some("identity"));
+            assert_eq!(header("content-encoding"), None);
+            assert_eq!(
+                serde_json::from_slice::<Value>(&received.body).unwrap(),
+                large
+            );
+        }
+
+        #[tokio::test]
+        async fn compresses_when_enabled() {
             // `{"ok":true}`, gzipped.
             const GZIPPED: &[u8] = &[
                 0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xab, 0x56, 0xca, 0xcf,
@@ -582,19 +652,45 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let client = Client::for_tests(&server.uri());
-            let request = ApiRequest::new(reqwest::Method::GET, "/thing".to_owned());
-            let response: Value = client.execute(request).await.unwrap();
-            assert_eq!(response, json!({ "ok": true }));
+            let client = Client::for_tests_with(&server.uri(), true);
+            let large = json!({ "text": "a".repeat(2 * crate::transport::MIN_GZIP_SIZE) });
+            let small = json!({ "text": "a" });
+            for body in [&large, &small] {
+                let request = ApiRequest::new(reqwest::Method::POST, "/thing".to_owned())
+                    .json(body)
+                    .unwrap();
+                let response: Value = client.execute(request).await.unwrap();
+                assert_eq!(response, json!({ "ok": true }));
+            }
 
-            let received = &server.received_requests().await.unwrap()[0];
-            let accept_encoding = received
-                .headers
-                .get("accept-encoding")
-                .and_then(|v| v.to_str().ok());
-            assert!(
-                accept_encoding.is_some_and(|v| v.contains("gzip")),
-                "{accept_encoding:?}"
+            let received = server.received_requests().await.unwrap();
+            let header =
+                |i: usize, name: &str| received[i].headers.get(name).and_then(|v| v.to_str().ok());
+            assert_eq!(header(0, "accept-encoding"), Some("gzip"));
+            // Large bodies are gzipped if the API accepts them, and small ones aren't worth it.
+            if crate::transport::GZIP_REQUEST_BODIES {
+                assert_eq!(header(0, "content-encoding"), Some("gzip"));
+                let mut decompressed = Vec::new();
+                std::io::Read::read_to_end(
+                    &mut flate2::read::GzDecoder::new(&received[0].body[..]),
+                    &mut decompressed,
+                )
+                .unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&decompressed).unwrap(),
+                    large
+                );
+            } else {
+                assert_eq!(header(0, "content-encoding"), None);
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&received[0].body).unwrap(),
+                    large
+                );
+            }
+            assert_eq!(header(1, "content-encoding"), None);
+            assert_eq!(
+                serde_json::from_slice::<Value>(&received[1].body).unwrap(),
+                small
             );
         }
 

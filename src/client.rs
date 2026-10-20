@@ -35,6 +35,8 @@ pub(crate) struct ClientInner {
     pub(crate) max_retries: u32,
     pub(crate) initial_retry_delay: Duration,
     pub(crate) max_retry_delay: Duration,
+    /// Whether to ask for gzipped responses and gzip large request bodies.
+    pub(crate) compression: bool,
     pub(crate) observer: Option<Arc<dyn RequestObserver>>,
     /// Whether the client's connector traces connections for the observer.
     pub(crate) trace_connections: bool,
@@ -65,16 +67,23 @@ impl Client {
     /// A client for tests that sends requests to `base_url` and retries without delay.
     #[cfg(test)]
     pub(crate) fn for_tests(base_url: &str) -> Self {
+        Self::for_tests_with(base_url, false)
+    }
+
+    /// Like [`for_tests`](Self::for_tests), with compression on or off.
+    #[cfg(test)]
+    pub(crate) fn for_tests_with(base_url: &str, compression: bool) -> Self {
         Self {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
                 base_url: base_url.to_owned(),
-                headers: crate::transport::default_headers(true),
+                headers: crate::transport::default_headers(true, compression),
                 stainless_headers: true,
                 timeout: Duration::from_secs(10),
                 max_retries: 2,
                 initial_retry_delay: Duration::from_millis(1),
                 max_retry_delay: Duration::from_millis(5),
+                compression,
                 observer: None,
                 trace_connections: false,
             }),
@@ -102,6 +111,7 @@ impl fmt::Debug for Client {
             .field("base_url", &self.inner.base_url)
             .field("timeout", &self.inner.timeout)
             .field("max_retries", &self.inner.max_retries)
+            .field("compression", &self.inner.compression)
             .finish_non_exhaustive()
     }
 }
@@ -116,6 +126,7 @@ pub struct ClientBuilder {
     base_url: Option<String>,
     timeout: Option<Duration>,
     max_retries: Option<u32>,
+    compression: Option<bool>,
     headers: Vec<(String, String)>,
     http_client: Option<reqwest::Client>,
     observer: Option<Arc<dyn RequestObserver>>,
@@ -158,6 +169,19 @@ impl ClientBuilder {
     /// backoff, honoring any `Retry-After` header from the server.
     pub fn max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = Some(max_retries);
+        self
+    }
+
+    /// Whether clients use gzip compression unless [`compression`](Self::compression) says otherwise. Like most HTTP
+    /// clients, they do. APIs whose clients shouldn't by default can change this with custom code.
+    const DEFAULT_COMPRESSION: bool = true;
+
+    /// Whether to use gzip compression. Defaults to `true`.
+    ///
+    /// When it's on, requests ask for gzipped responses. When it's off, they ask for uncompressed responses
+    /// (`accept-encoding: identity`).
+    pub fn compression(mut self, compression: bool) -> Self {
+        self.compression = Some(compression);
         self
     }
 
@@ -213,7 +237,8 @@ impl ClientBuilder {
         reqwest::Url::parse(&base_url)
             .map_err(|err| Error::Config(format!("invalid base URL {base_url:?}: {err}")))?;
 
-        let mut headers = crate::transport::default_headers(true);
+        let compression = self.compression.unwrap_or(Self::DEFAULT_COMPRESSION);
+        let mut headers = crate::transport::default_headers(true, compression);
         headers.insert(
             "authorization",
             sensitive_header(format!("Bearer {}", api_key))?,
@@ -250,6 +275,7 @@ impl ClientBuilder {
                 max_retries: self.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
                 initial_retry_delay: INITIAL_RETRY_DELAY,
                 max_retry_delay: MAX_RETRY_DELAY,
+                compression,
                 observer,
                 trace_connections,
             }),
@@ -264,6 +290,7 @@ impl fmt::Debug for ClientBuilder {
             .field("base_url", &self.base_url)
             .field("timeout", &self.timeout)
             .field("max_retries", &self.max_retries)
+            .field("compression", &self.compression)
             .finish_non_exhaustive()
     }
 }
@@ -501,6 +528,43 @@ mod tests {
             .execute::<Value>(ApiRequest::new(Method::GET, "/thing".to_owned()))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn asks_for_compression_only_when_enabled() {
+        let server = MockServer::start().await;
+        Mock::given(path("/thing"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let default = if ClientBuilder::DEFAULT_COMPRESSION {
+            "gzip"
+        } else {
+            "identity"
+        };
+        for (compression, expected) in [
+            (None, default),
+            (Some(false), "identity"),
+            (Some(true), "gzip"),
+        ] {
+            let mut builder = builder().base_url(server.uri());
+            if let Some(compression) = compression {
+                builder = builder.compression(compression);
+            }
+            let client = build(builder, &[]).unwrap();
+            client
+                .execute::<Value>(ApiRequest::new(Method::GET, "/thing".to_owned()))
+                .await
+                .unwrap();
+            let requests = server.received_requests().await.unwrap();
+            let header = requests
+                .last()
+                .unwrap()
+                .headers
+                .get("accept-encoding")
+                .and_then(|v| v.to_str().ok());
+            assert_eq!(header, Some(expected), "compression: {compression:?}");
+        }
     }
 
     #[tokio::test]
