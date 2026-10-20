@@ -3,6 +3,9 @@
 //! When enabled, the client buffers a small timing record for each request and attaches buffered records to a
 //! later request in the `X-turbopuffer-Client-Telemetry` header. The server controls how many requests are
 //! recorded by advertising a sample rate in the `X-turbopuffer-Client-Telemetry-Sample-Rate` response header.
+//!
+//! Each recorded request is sent with an `X-Request-Id` that its record repeats, so the server can show the
+//! client's timings in the same trace as its own.
 
 use std::any::Any;
 use std::collections::hash_map::RandomState;
@@ -10,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -24,11 +27,22 @@ use crate::types::{MultiQueryResult, QueryResult, WriteResult};
 const ENV_VAR: &str = "TURBOPUFFER_TELEMETRY";
 const HEADER: &str = "x-turbopuffer-client-telemetry";
 const SAMPLE_RATE_HEADER: &str = "x-turbopuffer-client-telemetry-sample-rate";
+/// Sorted by ASCII value, so that encoded IDs sort like their bytes.
+const REQUEST_ID_ALPHABET: &[u8; 32] = b"234567abcdefghijklmnopqrstuvwxyz";
+/// The bytes in a request ID before it's encoded. The first `REQUEST_ID_RANDOM_BYTES` are random, and the rest hold
+/// the time it was generated.
+const REQUEST_ID_BYTES: usize = 18;
+/// The request header that carries the IDs of recorded requests.
+const REQUEST_ID_HEADER: &str = "x-request-id";
+/// The prefix of generated request IDs.
+const REQUEST_ID_PREFIX: &str = "tpreq_";
+/// The random bytes at the start of a request ID.
+const REQUEST_ID_RANDOM_BYTES: usize = 12;
 
 const VERSION: u32 = 1;
 
 // Keeps the header well under the 8 KB per-line limit of common proxies.
-const MAX_RECORDS_PER_HEADER: usize = 20;
+const MAX_RECORDS_PER_HEADER: usize = 16;
 const MAX_BUFFERED_RECORDS: usize = 1000;
 
 /// Returns the observer that records telemetry for a client, or `None` if telemetry is disabled. `enabled`
@@ -137,6 +151,9 @@ struct Record {
     error: Option<&'static str>,
     #[serde(skip_serializing_if = "is_zero")]
     retries: u32,
+    /// The `X-Request-Id` the request was sent with, when the client generated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sample_rate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -322,12 +339,17 @@ impl Buffer {
         }
     }
 
-    /// Samples and buffers a record, dropping the oldest when full.
-    fn record(&self, mut record: Record) {
+    /// Decides whether to record a request that's starting, returning the sample rate it was recorded at.
+    fn sample(&self) -> Option<f64> {
         let rate = self.sample_rate();
         if rate <= 0.0 || (rate < 1.0 && (self.random)() >= rate) {
-            return;
+            return None;
         }
+        Some(rate)
+    }
+
+    /// Buffers the record of a request sampled at `rate`, dropping the oldest when full.
+    fn record(&self, mut record: Record, rate: f64) {
         if rate < 1.0 {
             record.sample_rate = Some(rate);
         }
@@ -382,6 +404,62 @@ fn random_fraction() -> f64 {
     (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
 
+/// Generates the ID of a request that will be recorded. Its format is private to turbopuffer, which only links IDs
+/// in the format it expects: 12 random bytes, then the 48-bit millisecond time they were generated XORed with the
+/// first 6 random bytes, in base32 after a prefix.
+fn new_request_id(now: SystemTime) -> String {
+    let random: [u8; REQUEST_ID_RANDOM_BYTES] = random_bytes();
+    let millis = now
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default();
+    let mut bytes = [0u8; REQUEST_ID_BYTES];
+    bytes[..REQUEST_ID_RANDOM_BYTES].copy_from_slice(&random);
+    for (i, byte) in millis.to_be_bytes()[2..].iter().enumerate() {
+        bytes[REQUEST_ID_RANDOM_BYTES + i] = byte ^ random[i];
+    }
+    let mut id = String::from(REQUEST_ID_PREFIX);
+    push_base32(&mut id, &bytes);
+    id
+}
+
+/// Appends base32 of `bytes` with `REQUEST_ID_ALPHABET`, in RFC 4648's bit order without padding.
+fn push_base32(out: &mut String, bytes: &[u8]) {
+    let char_at = |value: u32| REQUEST_ID_ALPHABET[value as usize & 31] as char;
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for byte in bytes {
+        buffer = (buffer << 8) | u32::from(*byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(char_at(buffer >> bits));
+        }
+        buffer &= (1 << bits) - 1;
+    }
+    if bits > 0 {
+        out.push(char_at(buffer << (5 - bits)));
+    }
+}
+
+/// Random bytes, without pulling in an RNG crate. Every `RandomState` has its own random keys, and the process ID
+/// keeps a forked process from repeating its parent's bytes.
+fn random_bytes<const N: usize>() -> [u8; N] {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let mut bytes = [0u8; N];
+    for chunk in bytes.chunks_mut(8) {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u32(std::process::id());
+        hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
+        hasher.write_u128(nanos);
+        chunk.copy_from_slice(&hasher.finish().to_le_bytes()[..chunk.len()]);
+    }
+    bytes
+}
+
 /// Records telemetry for a client's requests.
 #[derive(Debug)]
 struct TelemetryObserver {
@@ -390,10 +468,14 @@ struct TelemetryObserver {
 
 impl RequestObserver for TelemetryObserver {
     fn start(&self, info: &RequestInfo<'_>) -> Option<Box<dyn RequestScope>> {
+        // Sampled up front, so that only requests whose records the server will get are sent with request IDs.
+        let sample_rate = self.buffer.sample();
         Some(Box::new(TelemetryScope {
             buffer: self.buffer.clone(),
             route: route_template(info.method, info.url),
             batch: None,
+            request_id: sample_rate.map(|_| new_request_id(SystemTime::now())),
+            sample_rate,
         }))
     }
 }
@@ -403,6 +485,10 @@ struct TelemetryScope {
     route: String,
     /// Kept for later attempts until one of them may have reached the server.
     batch: Option<Batch>,
+    /// Sent with every attempt, so retries share the request's trace.
+    request_id: Option<String>,
+    /// The rate the request was recorded at, or `None` if it isn't recorded.
+    sample_rate: Option<f64>,
 }
 
 impl RequestScope for TelemetryScope {
@@ -410,9 +496,20 @@ impl RequestScope for TelemetryScope {
         // Taken only once a request is about to be sent, so one that fails before then can't lose it.
         if attempt == 0 {
             self.batch = self.buffer.take();
+            // An ID set by the caller is theirs to use, so the request keeps it and isn't linked.
+            if request.headers().contains_key(REQUEST_ID_HEADER) {
+                self.request_id = None;
+            }
         }
         if let Some(header) = self.batch.as_ref().and_then(|batch| batch.header.clone()) {
             request.headers_mut().insert(HEADER, header);
+        }
+        if let Some(request_id) = self
+            .request_id
+            .as_deref()
+            .and_then(|id| HeaderValue::from_str(id).ok())
+        {
+            request.headers_mut().insert(REQUEST_ID_HEADER, request_id);
         }
     }
 
@@ -430,6 +527,13 @@ impl RequestScope for TelemetryScope {
         if let Some(batch) = self.batch.take() {
             self.buffer.restore(batch);
         }
+        let Some(sample_rate) = self.sample_rate else {
+            return;
+        };
+        // A rate of zero asks clients to stop recording, even requests that were already sampled.
+        if self.buffer.sample_rate() <= 0.0 {
+            return;
+        }
         let mut record = Record {
             route: std::mem::take(&mut self.route),
             status: result
@@ -437,13 +541,14 @@ impl RequestScope for TelemetryScope {
                 .map_or(0, |response| response.status().as_u16()),
             error: result.error_kind.map(error_name),
             retries: result.retries,
+            request_id: self.request_id.take(),
             reused: result.timings.reused,
             server_total_us: result.parsed.and_then(server_total_ms).map(|ms| ms * 1000),
             ..Record::default()
         };
         let end = result.timings.deserialize_end.unwrap_or_else(Instant::now);
         record.set_durations(result.timings, end);
-        self.buffer.record(record);
+        self.buffer.record(record, sample_rate);
     }
 }
 
@@ -534,6 +639,39 @@ mod tests {
             .mount(&server)
             .await;
         server
+    }
+
+    /// The millisecond time and random bytes of a generated request ID, checking its format.
+    fn decode_request_id(id: &str) -> (u64, [u8; REQUEST_ID_RANDOM_BYTES]) {
+        let encoded = id.strip_prefix(REQUEST_ID_PREFIX).unwrap();
+        assert_eq!(encoded.len(), (REQUEST_ID_BYTES * 8).div_ceil(5), "{id}");
+        let (mut bytes, mut buffer, mut bits) = (Vec::new(), 0u32, 0u32);
+        for c in encoded.bytes() {
+            let value = REQUEST_ID_ALPHABET.iter().position(|a| *a == c).unwrap();
+            buffer = (buffer << 5) | value as u32;
+            bits += 5;
+            if bits >= 8 {
+                bits -= 8;
+                bytes.push((buffer >> bits) as u8);
+                buffer &= (1 << bits) - 1;
+            }
+        }
+        assert_eq!((bytes.len(), buffer), (REQUEST_ID_BYTES, 0), "{id}");
+        let mut millis = [0u8; 8];
+        for i in 0..REQUEST_ID_BYTES - REQUEST_ID_RANDOM_BYTES {
+            millis[2 + i] = bytes[REQUEST_ID_RANDOM_BYTES + i] ^ bytes[i];
+        }
+        (
+            u64::from_be_bytes(millis),
+            bytes[..REQUEST_ID_RANDOM_BYTES].try_into().unwrap(),
+        )
+    }
+
+    fn sent_request_id(request: &Request) -> Option<String> {
+        request
+            .headers
+            .get(REQUEST_ID_HEADER)
+            .map(|v| v.to_str().unwrap().to_owned())
     }
 
     fn record(status: u16) -> Record {
@@ -715,12 +853,15 @@ mod tests {
     #[test]
     fn encodes_headers() {
         let buffer = Buffer::new();
-        buffer.record(Record {
-            retries: 2,
-            server_total_us: Some(7000),
-            reused: Some(true),
-            ..record(200)
-        });
+        buffer.record(
+            Record {
+                retries: 2,
+                server_total_us: Some(7000),
+                reused: Some(true),
+                ..record(200)
+            },
+            1.0,
+        );
         let batch = buffer.take().unwrap();
         let header = batch.header.unwrap();
         let header = header.to_str().unwrap();
@@ -734,7 +875,7 @@ mod tests {
     fn full_buffers_drop_the_oldest_records() {
         let buffer = Buffer::new();
         for status in 0..(MAX_BUFFERED_RECORDS + 5) as u16 {
-            buffer.record(record(status));
+            buffer.record(record(status), 1.0);
         }
         let batch = buffer.take().unwrap();
         let envelope: Value =
@@ -752,7 +893,7 @@ mod tests {
     #[test]
     fn takes_records_when_the_first_attempt_begins() {
         let buffer = Arc::new(Buffer::new());
-        buffer.record(record(200));
+        buffer.record(record(200), 1.0);
         let observer = TelemetryObserver {
             buffer: buffer.clone(),
         };
@@ -781,10 +922,10 @@ mod tests {
     fn restores_batches_in_order() {
         let buffer = Buffer::new();
         for status in 0..3 {
-            buffer.record(record(status));
+            buffer.record(record(status), 1.0);
         }
         let batch = buffer.take().unwrap();
-        buffer.record(record(3));
+        buffer.record(record(3), 1.0);
         buffer.restore(batch);
         let statuses: Vec<Value> = take_records(&buffer)
             .iter()
@@ -794,11 +935,11 @@ mod tests {
 
         // Restoring into a full buffer drops the batch's records, which are the oldest.
         for status in 0..2 {
-            buffer.record(record(status));
+            buffer.record(record(status), 1.0);
         }
         let batch = buffer.take().unwrap();
         for _ in 0..MAX_BUFFERED_RECORDS - 1 {
-            buffer.record(record(9));
+            buffer.record(record(9), 1.0);
         }
         buffer.restore(batch);
         let envelope: Value =
@@ -825,29 +966,29 @@ mod tests {
     }
 
     #[test]
-    fn samples_records() {
+    fn samples_requests() {
         let mut buffer = Buffer::new();
         buffer.random = || 0.3;
         buffer
             .sample_rate
             .store(0.5f64.to_bits(), Ordering::Relaxed);
-        buffer.record(record(200));
+        assert_eq!(buffer.sample(), Some(0.5));
+        buffer.record(record(200), 0.5);
         assert_eq!(take_records(&buffer)[0]["sample_rate"], 0.5);
 
         buffer
             .sample_rate
             .store(0.25f64.to_bits(), Ordering::Relaxed);
-        buffer.record(record(200));
-        assert!(buffer.take().is_none());
+        assert_eq!(buffer.sample(), None);
 
         buffer.random = || 0.0;
         buffer.sample_rate.store(0f64.to_bits(), Ordering::Relaxed);
-        buffer.record(record(200));
-        assert!(buffer.take().is_none());
+        assert_eq!(buffer.sample(), None);
 
         // A full rate isn't reported.
         buffer.sample_rate.store(1f64.to_bits(), Ordering::Relaxed);
-        buffer.record(record(200));
+        assert_eq!(buffer.sample(), Some(1.0));
+        buffer.record(record(200), 1.0);
         assert!(take_records(&buffer)[0].get("sample_rate").is_none());
     }
 
@@ -943,6 +1084,8 @@ mod tests {
         query(&client).await.unwrap();
         query(&client).await.unwrap();
         assert!(received(&server).await.iter().all(Option::is_none));
+        let requests = server.received_requests().await.unwrap();
+        assert!(requests.iter().all(|r| sent_request_id(r).is_none()));
     }
 
     #[tokio::test]
@@ -1074,7 +1217,7 @@ mod tests {
             .mount(&server)
             .await;
         let client = retrying_client(&server.uri());
-        buffer(&server.uri()).record(record(200));
+        buffer(&server.uri()).record(record(200), 1.0);
 
         query(&client).await.unwrap();
 
@@ -1101,6 +1244,9 @@ mod tests {
 
         assert!(received(&server).await.iter().all(Option::is_none));
         assert!(buffer(&server.uri()).take().is_none());
+        // Unrecorded requests have no request IDs to link.
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(sent_request_id(&requests[1]), None);
     }
 
     #[tokio::test]
@@ -1145,5 +1291,117 @@ mod tests {
             "POST /v2/namespaces/{ns}/query?stainless_overload=multiQuery"
         );
         assert_eq!(record["server_total_us"], 7000);
+    }
+    #[test]
+    fn encodes_base32() {
+        // The vectors of riverpro's uuidbase32, which uses the same encoding.
+        for (byte, encoded) in [
+            (0x00, "22222222222222222222222222"),
+            (0x01, "22222222222222222222222226"),
+            (0x0f, "2222222222222222222222223w"),
+            (0xff, "222222222222222222222222zw"),
+        ] {
+            let mut bytes = [0u8; 16];
+            bytes[15] = byte;
+            let mut out = String::new();
+            push_base32(&mut out, &bytes);
+            assert_eq!(out, encoded);
+        }
+        let mut out = String::new();
+        push_base32(&mut out, &[0xff; 16]);
+        assert_eq!(out, "zzzzzzzzzzzzzzzzzzzzzzzzzw");
+
+        // A request ID, generated by Python's base64 module independently of either implementation.
+        let random = [
+            0x9f, 0x1c, 0x2e, 0x7a, 0x4b, 0x6d, 0x8e, 0x0f, 0x1a, 0x2b, 0x3c, 0x4d,
+        ];
+        let mut bytes = [0u8; REQUEST_ID_BYTES];
+        bytes[..REQUEST_ID_RANDOM_BYTES].copy_from_slice(&random);
+        for (i, byte) in 1_792_497_600_123u64.to_be_bytes()[2..].iter().enumerate() {
+            bytes[REQUEST_ID_RANDOM_BYTES + i] = byte ^ random[i];
+        }
+        let mut out = String::new();
+        push_base32(&mut out, &bytes);
+        assert_eq!(out, "nwi4wymfhqb2yalfblatxjfremalg");
+        assert_eq!(
+            decode_request_id("tpreq_nwi4wymfhqb2yalfblatxjfremalg"),
+            (1_792_497_600_123, random)
+        );
+    }
+
+    #[test]
+    fn generates_request_ids() {
+        let now = UNIX_EPOCH + Duration::from_millis(1_792_497_600_123);
+        let (millis, random) = decode_request_id(&new_request_id(now));
+        assert_eq!(millis, 1_792_497_600_123);
+        let (_, other) = decode_request_id(&new_request_id(now));
+        assert_ne!(random, other);
+    }
+
+    #[tokio::test]
+    async fn keeps_request_ids_set_by_callers() {
+        let server = query_server(ResponseTemplate::new(200).set_body_json(query_body())).await;
+        let client = Client::builder()
+            .api_key(API_KEY)
+            .base_url(server.uri())
+            .telemetry(true)
+            .default_header("X-Request-Id", "my-request")
+            .build()
+            .unwrap();
+
+        query(&client).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(sent_request_id(&requests[0]).as_deref(), Some("my-request"));
+        let records = take_records(&buffer(&server.uri()));
+        assert!(records[0].get("request_id").is_none(), "{}", records[0]);
+    }
+
+    #[tokio::test]
+    async fn retries_keep_their_request_ids() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v2/namespaces/my-ns/query"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v2/namespaces/my-ns/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(query_body()))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+        let client = retrying_client(&server.uri());
+
+        query(&client).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let id = sent_request_id(&requests[0]).unwrap();
+        assert_eq!(sent_request_id(&requests[1]), Some(id.clone()));
+        let records = take_records(&buffer(&server.uri()));
+        assert_eq!(records[0]["request_id"], id.as_str());
+        assert_eq!(records[0]["retries"], 1);
+    }
+
+    #[tokio::test]
+    async fn sends_request_ids_that_records_repeat() {
+        let server = query_server(ResponseTemplate::new(200).set_body_json(query_body())).await;
+        let client = client(&server.uri());
+
+        query(&client).await.unwrap();
+        query(&client).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let ids: Vec<String> = requests
+            .iter()
+            .map(|r| sent_request_id(r).unwrap())
+            .collect();
+        assert_ne!(ids[0], ids[1]);
+        for id in &ids {
+            decode_request_id(id);
+        }
+        let records = sent_records(&requests[1]).unwrap();
+        assert_eq!(records[0]["request_id"], ids[0].as_str());
     }
 }
