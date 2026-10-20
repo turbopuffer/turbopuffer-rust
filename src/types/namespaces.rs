@@ -233,13 +233,6 @@ pub enum AggregateBy {
         /// The name of the attribute to sum (must be of numeric type).
         attr: String,
     },
-    /// Count documents with a non-null value for the given attribute.
-    #[deprecated]
-    CountDeprecated {
-        /// The name of the attribute to count (only documents with non-null values for the
-        /// attribute are counted). DEPRECATED. Use `Count` instead.
-        attr: String,
-    },
 }
 
 #[allow(deprecated)]
@@ -253,12 +246,6 @@ impl AggregateBy {
     pub fn sum(attr: impl Into<String>) -> Self {
         Self::Sum { attr: attr.into() }
     }
-
-    /// Count documents with a non-null value for the given attribute.
-    #[deprecated]
-    pub fn count_deprecated(attr: impl Into<String>) -> Self {
-        Self::CountDeprecated { attr: attr.into() }
-    }
 }
 
 #[allow(deprecated)]
@@ -267,7 +254,6 @@ impl Serialize for AggregateBy {
         match self {
             Self::Count => ("Count",).serialize(serializer),
             Self::Sum { attr } => ("Sum", attr).serialize(serializer),
-            Self::CountDeprecated { attr } => ("Count", attr).serialize(serializer),
         }
     }
 }
@@ -282,11 +268,6 @@ impl<'de> Deserialize<'de> for AggregateBy {
         if let Some(elements) = tuple_elements(&value, 2, &[(0, "Sum")]) {
             if let Some(attr) = decode_element(&elements[1]) {
                 return Ok(Self::Sum { attr });
-            }
-        }
-        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Count")]) {
-            if let Some(attr) = decode_element(&elements[1]) {
-                return Ok(Self::CountDeprecated { attr });
             }
         }
         Err(serde::de::Error::custom(format!(
@@ -4799,8 +4780,6 @@ pub enum NamespaceMetadataPatchPinning {
     Bool(bool),
     /// Configuration for namespace pinning.
     PinningConfig(PinningConfig),
-    /// A value not known to this version of the SDK.
-    Other(Value),
 }
 
 impl From<bool> for NamespaceMetadataPatchPinning {
@@ -5206,45 +5185,6 @@ impl From<Vector> for ColumnsVector {
     }
 }
 
-/// Request to update namespace metadata configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[non_exhaustive]
-pub struct NamespaceMetadataPatch {
-    /// Configuration for namespace pinning.
-    /// - Missing field: no change to pinning configuration
-    /// - `null` or `false`: explicitly remove pinning
-    /// - `true`: enable pinning with default configuration
-    /// - Object: set pinning configuration
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pinning: Option<NamespaceMetadataPatchPinning>,
-    /// Set to `true` to reject document and schema writes, or `false` to allow them. Writes already
-    /// in progress may still commit. Metadata updates remain available.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub read_only: Option<bool>,
-}
-
-impl NamespaceMetadataPatch {
-    /// Creates a new [`NamespaceMetadataPatch`].
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Configuration for namespace pinning. - Missing field: no change to pinning configuration -
-    /// `null` or `false`: explicitly remove pinning - `true`: enable pinning with default configuration
-    /// - Object: set pinning configuration
-    pub fn pinning(mut self, pinning: impl Into<NamespaceMetadataPatchPinning>) -> Self {
-        self.pinning = Some(pinning.into());
-        self
-    }
-
-    /// Set to `true` to reject document and schema writes, or `false` to allow them. Writes already in
-    /// progress may still commit. Metadata updates remain available.
-    pub fn read_only(mut self, read_only: bool) -> Self {
-        self.read_only = Some(read_only);
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -5257,10 +5197,6 @@ mod tests {
         let cases: Vec<(AggregateBy, Value)> = vec![
             (AggregateBy::count(), json!(["Count"])),
             (AggregateBy::sum("attr"), json!(["Sum", "attr"])),
-            (
-                AggregateBy::count_deprecated("attr"),
-                json!(["Count", "attr"]),
-            ),
         ];
         for (value, expected) in cases {
             let json = serde_json::to_value(&value).unwrap();
