@@ -38,9 +38,9 @@ async fn main() -> Result<(), turbopuffer::Error> {
         .write()
         .distance_metric(DistanceMetric::CosineDistance)
         .upsert_rows([Row::new("2108ed60-6851-49a0-9016-8325434f3845")
-        .vector([0.1, 0.2])
-        .insert("name", "Red boots")
-        .insert("price", 34.99)])
+            .vector([0.1, 0.2])
+            .insert("name", "Red boots")
+            .insert("price", 34.99)])
         .send()
         .await?;
     println!("{:?}", response.rows_affected);
@@ -114,10 +114,7 @@ async fn main() -> Result<(), turbopuffer::Error> {
         .region("gcp-us-central1")
         .build()?;
 
-    let mut stream = client
-        .namespaces()
-        .prefix("products")
-        .into_stream();
+    let mut stream = client.namespaces().prefix("products").into_stream();
     while let Some(item) = stream.try_next().await? {
         println!("{item:?}");
     }
@@ -137,11 +134,7 @@ async fn main() -> Result<(), turbopuffer::Error> {
         .region("gcp-us-central1")
         .build()?;
 
-    let page = client
-        .namespaces()
-        .prefix("products")
-        .send()
-        .await?;
+    let page = client.namespaces().prefix("products").send().await?;
     for item in page.items() {
         println!("{item:?}");
     }
@@ -168,14 +161,12 @@ async fn main() -> Result<(), turbopuffer::Error> {
         .region("gcp-us-central1")
         .build()?;
 
-    let result = client
-        .namespaces()
-        .prefix("foo")
-        .send()
-        .await;
+    let result = client.namespaces().prefix("foo").send().await;
     match result {
         Ok(response) => println!("{response:?}"),
-        Err(Error::Api(err)) if err.kind() == ApiErrorKind::NotFound => println!("not found: {}", err.message),
+        Err(Error::Api(err)) if err.kind() == ApiErrorKind::NotFound => {
+            println!("not found: {}", err.message)
+        }
         Err(Error::Api(err)) => println!("API error {}: {}", err.status, err.message),
         Err(err) => return Err(err),
     }
