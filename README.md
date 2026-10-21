@@ -28,7 +28,7 @@ use turbopuffer::Client;
 use turbopuffer::types::{DistanceMetric, Row};
 
 #[tokio::main]
-async fn main() -> Result<(), turbopuffer::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .region("gcp-us-central1")
         .build()?;
@@ -80,7 +80,7 @@ use turbopuffer::Client;
 use turbopuffer::types::{Filter, RankBy};
 
 #[tokio::main]
-async fn main() -> Result<(), turbopuffer::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .region("gcp-us-central1")
         .build()?;
@@ -109,7 +109,7 @@ use futures::TryStreamExt;
 use turbopuffer::Client;
 
 #[tokio::main]
-async fn main() -> Result<(), turbopuffer::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .region("gcp-us-central1")
         .build()?;
@@ -129,7 +129,7 @@ Or fetch one page at a time with `send`, then `next_page`:
 use turbopuffer::Client;
 
 #[tokio::main]
-async fn main() -> Result<(), turbopuffer::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .region("gcp-us-central1")
         .build()?;
@@ -148,7 +148,7 @@ async fn main() -> Result<(), turbopuffer::Error> {
 
 ## Handling errors
 
-Methods return [`turbopuffer::Result`](https://docs.rs/turbopuffer/latest/turbopuffer/type.Result.html). When the API responds with a non-success status code, the error is `Error::Api`, with the status code, message, and response body. Other variants cover timeouts, connection errors, responses that couldn't be decoded, and `Error::Json` for your own conversions to or from JSON, which `serde_json::Error` converts into with `?`.
+Methods return [`turbopuffer::Result`](https://docs.rs/turbopuffer/latest/turbopuffer/type.Result.html). When the API responds with a non-success status code, the error is `Error::Api`, with the status code, message, and response body. Other variants cover timeouts, connection errors, responses that couldn't be decoded, and `Error::Json` for your own conversions to or from JSON, which `serde_json::Error` converts into with `?`. Building a client returns a [`BuildError`](https://docs.rs/turbopuffer/latest/turbopuffer/struct.BuildError.html) instead, when a setting is missing or invalid.
 
 ```rust no_run
 use turbopuffer::ApiErrorKind;
@@ -156,7 +156,7 @@ use turbopuffer::Client;
 use turbopuffer::Error;
 
 #[tokio::main]
-async fn main() -> Result<(), turbopuffer::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .region("gcp-us-central1")
         .build()?;
@@ -168,7 +168,7 @@ async fn main() -> Result<(), turbopuffer::Error> {
             println!("not found: {}", err.message)
         }
         Err(Error::Api(err)) => println!("API error {}: {}", err.status, err.message),
-        Err(err) => return Err(err),
+        Err(err) => return Err(err.into()),
     }
 
     Ok(())
@@ -184,7 +184,7 @@ use std::time::Duration;
 
 use turbopuffer::Client;
 
-fn configure() -> Result<Client, turbopuffer::Error> {
+fn configure() -> Result<Client, turbopuffer::BuildError> {
     Client::builder()
         .max_retries(0) // disable retries
         .timeout(Duration::from_secs(20))

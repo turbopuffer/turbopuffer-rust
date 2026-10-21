@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderValue};
 
-use crate::error::{Error, Result};
+use crate::error::{BuildError, Result};
 use crate::observer::RequestObserver;
 
 /// The `production` environment's base URL.
@@ -29,6 +29,8 @@ pub struct Client {
 pub(crate) struct ClientInner {
     pub(crate) http: reqwest::Client,
     pub(crate) base_url: String,
+    /// `base_url`, parsed when the client was built.
+    pub(crate) base: reqwest::Url,
     pub(crate) headers: HeaderMap,
     pub(crate) stainless_headers: bool,
     pub(crate) timeout: Duration,
@@ -55,7 +57,7 @@ impl Client {
     /// - `TURBOPUFFER_BASE_URL`: overrides the base URL
     ///
     /// Equivalent to `Client::builder().build()`.
-    pub fn from_env() -> Result<Self> {
+    pub fn from_env() -> Result<Self, BuildError> {
         Self::builder().build()
     }
 
@@ -77,6 +79,7 @@ impl Client {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
                 base_url: base_url.to_owned(),
+                base: base_url.parse().unwrap(),
                 headers: crate::transport::default_headers(true, compression),
                 stainless_headers: true,
                 timeout: Duration::from_secs(10),
@@ -209,13 +212,13 @@ impl ClientBuilder {
     /// Creates the client.
     ///
     /// Fails if a required setting is missing or invalid.
-    pub fn build(self) -> Result<Client> {
+    pub fn build(self) -> Result<Client, BuildError> {
         self.build_with_env(env_var)
     }
 
     /// Like [`build`](Self::build), but reads environment variables with `env`, so that tests don't depend on
     /// the process's environment.
-    fn build_with_env(self, env: impl Fn(&str) -> Option<String>) -> Result<Client> {
+    fn build_with_env(self, env: impl Fn(&str) -> Option<String>) -> Result<Client, BuildError> {
         let Some(api_key) = self.api_key.or_else(|| env("TURBOPUFFER_API_KEY")) else {
             return Err(missing_setting("api_key", Some("TURBOPUFFER_API_KEY")));
         };
@@ -234,8 +237,8 @@ impl ClientBuilder {
             "region",
             Some("TURBOPUFFER_REGION"),
         )?;
-        reqwest::Url::parse(&base_url)
-            .map_err(|err| Error::Config(format!("invalid base URL {base_url:?}: {err}")))?;
+        let base = reqwest::Url::parse(&base_url)
+            .map_err(|err| BuildError::new(format!("invalid base URL {base_url:?}: {err}")))?;
 
         let compression = self.compression.unwrap_or(Self::DEFAULT_COMPRESSION);
         let mut headers = crate::transport::default_headers(true, compression);
@@ -245,7 +248,7 @@ impl ClientBuilder {
         );
         for (name, value) in self.headers {
             let name = reqwest::header::HeaderName::try_from(name.as_str())
-                .map_err(|err| Error::Config(format!("invalid header name {name:?}: {err}")))?;
+                .map_err(|err| BuildError::new(format!("invalid header name {name:?}: {err}")))?;
             headers.insert(name, header_value(value)?);
         }
 
@@ -259,9 +262,9 @@ impl ClientBuilder {
                 if trace_connections {
                     builder = builder.connector_layer(crate::observer::ConnectLayer);
                 }
-                builder
-                    .build()
-                    .map_err(|err| Error::Config(format!("failed to create HTTP client: {err}")))?
+                builder.build().map_err(|err| {
+                    BuildError::new(format!("failed to create HTTP client: {err}"))
+                })?
             }
         };
 
@@ -269,6 +272,7 @@ impl ClientBuilder {
             inner: Arc::new(ClientInner {
                 http,
                 base_url,
+                base,
                 headers,
                 stainless_headers: true,
                 timeout: self.timeout.unwrap_or(DEFAULT_TIMEOUT),
@@ -300,9 +304,9 @@ fn env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
-fn header_value(value: String) -> Result<HeaderValue> {
+fn header_value(value: String) -> Result<HeaderValue, BuildError> {
     HeaderValue::try_from(value)
-        .map_err(|err| Error::Config(format!("invalid header value: {err}")))
+        .map_err(|err| BuildError::new(format!("invalid header value: {err}")))
 }
 
 /// Fills in a `{placeholder}` in the base URL with the value of a setting.
@@ -317,12 +321,12 @@ fn fill_server_variable(
     explicit: bool,
     setting: &str,
     env: Option<&str>,
-) -> Result<String> {
+) -> Result<String, BuildError> {
     let pattern = format!("{{{placeholder}}}");
     match value {
         Some(value) if url.contains(&pattern) => Ok(url.replace(&pattern, value)),
         None if url.contains(&pattern) => Err(missing_setting(setting, env)),
-        Some(_) if explicit => Err(Error::Config(format!(
+        Some(_) if explicit => Err(BuildError::new(format!(
             "{setting} is set, but the base URL {url:?} doesn't use it"
         ))),
         _ => Ok(url),
@@ -330,19 +334,19 @@ fn fill_server_variable(
 }
 
 /// The error for a required setting that wasn't provided.
-fn missing_setting(name: &str, env: Option<&str>) -> Error {
+fn missing_setting(name: &str, env: Option<&str>) -> BuildError {
     let hint = match env {
         Some(env) => {
             format!("set it with `ClientBuilder::{name}` or the `{env}` environment variable")
         }
         None => format!("set it with `ClientBuilder::{name}`"),
     };
-    Error::Config(format!("missing {name}: {hint}"))
+    BuildError::new(format!("missing {name}: {hint}"))
 }
 
 /// A header value that's redacted from debug output.
 #[allow(dead_code)]
-fn sensitive_header(value: String) -> Result<HeaderValue> {
+fn sensitive_header(value: String) -> Result<HeaderValue, BuildError> {
     let mut value = header_value(value)?;
     value.set_sensitive(true);
     Ok(value)
@@ -369,16 +373,13 @@ mod tests {
     }
 
     /// Builds a client with a fake set of environment variables.
-    fn build(builder: ClientBuilder, env: &[(&str, &str)]) -> Result<Client> {
+    fn build(builder: ClientBuilder, env: &[(&str, &str)]) -> Result<Client, BuildError> {
         let env: HashMap<&str, &str> = env.iter().copied().collect();
         builder.build_with_env(|name| env.get(name).map(|value| (*value).to_owned()))
     }
 
-    fn config_error(result: Result<Client>) -> String {
-        match result {
-            Err(Error::Config(message)) => message,
-            other => panic!("expected a configuration error, got {other:?}"),
-        }
+    fn config_error(result: Result<Client, BuildError>) -> String {
+        result.expect_err("expected a configuration error").message
     }
 
     #[test]

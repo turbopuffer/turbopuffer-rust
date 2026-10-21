@@ -5,7 +5,6 @@ use super::*;
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -3287,7 +3286,7 @@ pub struct NamespaceMetadata {
     /// The approximate number of rows in the namespace.
     pub approx_row_count: u64,
     /// The timestamp when the namespace was created.
-    pub created_at: DateTime<Utc>,
+    pub created_at: jiff::Timestamp,
     /// The encryption configuration for a namespace.
     pub encryption: Encryption,
     /// The state of the namespace's index.
@@ -3295,7 +3294,7 @@ pub struct NamespaceMetadata {
     /// The schema of the namespace.
     pub schema: BTreeMap<String, AttributeSchemaConfig>,
     /// The timestamp when the namespace was last modified by a write operation.
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: jiff::Timestamp,
     /// Configuration for namespace pinning, along with the current status of the pinned namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinning: Option<PinningConfigResponse>,
@@ -4038,7 +4037,7 @@ pub struct PinningStatus {
     /// updated independently and may briefly disagree with the other status fields.
     pub replicas: u64,
     /// The timestamp of the latest pinning status snapshot.
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: jiff::Timestamp,
     /// Aggregate utilization for the pinned namespace, reported as a value between 0.0 and 1.0.
     pub utilization: f64,
 }
@@ -4637,7 +4636,7 @@ impl From<CopyFromNamespaceOperationFinished> for CopyFromNamespaceOperation {
 #[non_exhaustive]
 pub struct CopyFromNamespaceOperationRunning {
     /// The time at which the operation started.
-    pub start_time: DateTime<Utc>,
+    pub start_time: jiff::Timestamp,
     /// A freeform description of the operation's progress. May be absent, and its format may
     /// change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4649,11 +4648,11 @@ pub struct CopyFromNamespaceOperationRunning {
 #[non_exhaustive]
 pub struct CopyFromNamespaceOperationFinished {
     /// The time at which the operation finished.
-    pub finish_time: DateTime<Utc>,
+    pub finish_time: jiff::Timestamp,
     /// The result of the copy.
     pub result: CopyFromNamespaceOperationResult,
     /// The time at which the operation started.
-    pub start_time: DateTime<Utc>,
+    pub start_time: jiff::Timestamp,
 }
 
 /// The result of a finished copy operation.

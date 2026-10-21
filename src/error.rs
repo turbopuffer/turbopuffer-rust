@@ -7,7 +7,7 @@ use serde_json::Value;
 /// A `Result` alias where the error defaults to [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// An error returned by the client.
+/// An error returned by a request. Building a client returns a [`BuildError`] instead.
 ///
 /// Errors caused by another error, like [`Error::Connection`], return it from [`std::error::Error::source`] rather
 /// than repeating it in their message, so error reporters like `anyhow`'s show each cause once.
@@ -46,10 +46,6 @@ pub enum Error {
     /// [`Result`].
     #[error("failed to convert to or from JSON")]
     Json(#[from] serde_json::Error),
-
-    /// The client is misconfigured, e.g. because it's missing an API key.
-    #[error("invalid client configuration: {0}")]
-    Config(String),
 }
 
 impl Error {
@@ -202,6 +198,24 @@ pub enum ApiErrorKind {
     Other,
 }
 
+/// An error building a [`Client`](crate::Client), because a setting is missing or invalid, e.g. there's no API key.
+///
+/// Returned by [`ClientBuilder::build`](crate::ClientBuilder::build) and [`Client::from_env`](crate::Client::from_env)
+/// rather than [`Error`], since building a client doesn't send any requests.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("invalid client configuration: {message}")]
+pub struct BuildError {
+    pub(crate) message: String,
+}
+
+impl BuildError {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
 /// The property of an error response body holding a human-readable message.
 const ERROR_MESSAGE_PROPERTY: Option<&str> = Some("error");
 
@@ -253,7 +267,6 @@ mod tests {
     #[test]
     fn classifies_retryable_errors() {
         assert!(Error::Timeout.is_retryable());
-        assert!(!Error::Config("missing API key".to_owned()).is_retryable());
         assert!(
             Error::from(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "slow down")).is_retryable()
         );

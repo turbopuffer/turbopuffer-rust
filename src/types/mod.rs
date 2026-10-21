@@ -5,7 +5,7 @@
 //! they already hold, so calling one again adds more items rather than replacing them.
 //!
 //! Free-form values, like a filter's value or a row's attributes, take anything that implements
-//! `serde::Serialize`: numbers, strings, `serde_json::Value`s, `chrono` datetimes, and your own types. They
+//! `serde::Serialize`: numbers, strings, `serde_json::Value`s, `jiff` timestamps, and your own types. They
 //! panic if a value fails to serialize, like `serde_json::json!` does, which only happens for maps with keys
 //! that aren't strings or numbers, or `Serialize` implementations that return errors.
 

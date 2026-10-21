@@ -236,7 +236,7 @@ impl Client {
         let inner = &self.inner;
         let max_retries = request.options.max_retries.unwrap_or(inner.max_retries);
         let timeout = request.options.timeout.unwrap_or(inner.timeout);
-        let url = self.url(request)?;
+        let url = self.url(request);
         // Compressed once, rather than for each attempt.
         let body = self.encode_body(request);
 
@@ -287,14 +287,14 @@ impl Client {
         }
     }
 
-    fn url(&self, request: &ApiRequest) -> Result<Url> {
-        let base = self.inner.base_url.trim_end_matches('/');
-        let mut url = Url::parse(&format!("{base}{}", request.path))
-            .map_err(|err| Error::Config(format!("invalid request URL: {err}")))?;
+    fn url(&self, request: &ApiRequest) -> Url {
+        let mut url = self.inner.base.clone();
+        let path = format!("{}{}", url.path().trim_end_matches('/'), request.path);
+        url.set_path(&path);
         if !request.query.is_empty() {
             url.query_pairs_mut().extend_pairs(&request.query);
         }
-        Ok(url)
+        url
     }
 
     /// A request's body as it's sent, and whether it's gzipped: it is when the API accepts gzipped bodies,
@@ -437,9 +437,12 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
         match value.parse::<f64>() {
             Ok(secs) => Duration::try_from_secs_f64(secs).ok()?,
             Err(_) => {
-                let date = chrono::DateTime::parse_from_rfc2822(value).ok()?;
-                (date.with_timezone(&chrono::Utc) - chrono::Utc::now())
-                    .to_std()
+                let date = jiff::fmt::rfc2822::DateTimeParser::new()
+                    .parse_timestamp(value)
+                    .ok()?;
+                jiff::Timestamp::now()
+                    .duration_until(date)
+                    .try_into()
                     .ok()?
             }
         }
@@ -516,6 +519,27 @@ mod tests {
     }
 
     #[test]
+    fn appends_request_paths_to_the_base_url() {
+        let url = |base: &str| {
+            let request = ApiRequest::new(Method::GET, "/things/a%20b".to_owned())
+                .query(vec![("limit".to_owned(), "10".to_owned())]);
+            Client::for_tests(base).url(&request).to_string()
+        };
+        assert_eq!(
+            url("https://api.example.com"),
+            "https://api.example.com/things/a%20b?limit=10"
+        );
+        assert_eq!(
+            url("https://api.example.com/"),
+            "https://api.example.com/things/a%20b?limit=10"
+        );
+        assert_eq!(
+            url("https://example.com/api/"),
+            "https://example.com/api/things/a%20b?limit=10"
+        );
+    }
+
+    #[test]
     fn parses_retry_after() {
         let mut headers = HeaderMap::new();
         headers.insert("retry-after", HeaderValue::from_static("2"));
@@ -526,6 +550,24 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         headers.insert("retry-after", HeaderValue::from_static("999999"));
+        assert_eq!(retry_after(&headers), None);
+
+        // HTTP dates are relative to now, and ones in the past don't apply.
+        let date = jiff::Timestamp::now() + jiff::SignedDuration::from_secs(30);
+        let date = jiff::fmt::rfc2822::DateTimePrinter::new()
+            .timestamp_to_rfc9110_string(&date)
+            .unwrap();
+        headers.insert("retry-after", HeaderValue::from_str(&date).unwrap());
+        let delay = retry_after(&headers).unwrap();
+        assert!(
+            delay > Duration::from_secs(28) && delay <= Duration::from_secs(30),
+            "{delay:?}"
+        );
+
+        headers.insert(
+            "retry-after",
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
+        );
         assert_eq!(retry_after(&headers), None);
     }
 
