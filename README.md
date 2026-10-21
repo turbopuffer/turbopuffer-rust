@@ -211,8 +211,8 @@ The client can report its own request timings to turbopuffer to help diagnose la
 ```rust no_run
 use turbopuffer::Client;
 
-fn configure() -> Result<Client, turbopuffer::Error> {
-    Client::builder().telemetry(true).build()
+fn configure() -> Result<Client, Box<dyn std::error::Error>> {
+    Ok(Client::builder().telemetry(true).build()?)
 }
 ```
 
