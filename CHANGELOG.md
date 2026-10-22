@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.0-alpha.2](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2026-10-22)
+
+
+### Features
+
+* Base64-encode upserted vectors on writes ([#13](https://github.com/turbopuffer/turbopuffer-rust/issues/13)) ([452a123](https://github.com/turbopuffer/turbopuffer-rust/commit/452a1236074015d4a7d17a46fb4580d927bbe971))
+
+
+### Bug Fixes
+
+* Decode v1 encryption in `update_metadata()` responses ([#14](https://github.com/turbopuffer/turbopuffer-rust/issues/14)) ([c90072a](https://github.com/turbopuffer/turbopuffer-rust/commit/c90072a9dee1a8d5304884c1475f47e70bfa9624))
+
+
+### Chores
+
+* Declare `respond_async` above the imports in `transport.rs` ([#18](https://github.com/turbopuffer/turbopuffer-rust/issues/18)) ([06f9cbc](https://github.com/turbopuffer/turbopuffer-rust/commit/06f9cbc13deeb76e4d9fe1099f1b2d228660cad8))
+* Keep releases on the prerelease line ([#16](https://github.com/turbopuffer/turbopuffer-rust/issues/16)) ([86ca139](https://github.com/turbopuffer/turbopuffer-rust/commit/86ca1398f38d988945b086ed7a8c530ee4b19955))
+* Move custom code out of the way of generated changes ([#17](https://github.com/turbopuffer/turbopuffer-rust/issues/17)) ([9a2453b](https://github.com/turbopuffer/turbopuffer-rust/commit/9a2453b7b91e763500ef23f57ae5458399678631))
+
 ## [0.1.0-alpha.1](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.0.1...v0.1.0-alpha.1) (2026-10-21)
 
 
