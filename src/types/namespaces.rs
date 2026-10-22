@@ -3288,6 +3288,7 @@ pub struct NamespaceMetadata {
     /// The timestamp when the namespace was created.
     pub created_at: jiff::Timestamp,
     /// The encryption configuration for a namespace.
+    #[serde(deserialize_with = "crate::custom::encryption::deserialize")]
     pub encryption: Encryption,
     /// The state of the namespace's index.
     pub index: NamespaceMetadataIndex,
