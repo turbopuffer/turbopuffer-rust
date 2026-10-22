@@ -146,6 +146,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Each page has the details of the response it came in, like its `request_id`. To stream pages rather than items, use `into_page_stream`.
+
 ## Handling errors
 
 Methods return [`turbopuffer::Result`](https://docs.rs/turbopuffer/latest/turbopuffer/type.Result.html). When the API responds with a non-success status code, the error is `Error::Api`, with the status code, message, and response body. Other variants cover timeouts, connection errors, responses that couldn't be decoded, and `Error::Json` for your own conversions to or from JSON, which `serde_json::Error` converts into with `?`. Building a client returns a [`BuildError`](https://docs.rs/turbopuffer/latest/turbopuffer/struct.BuildError.html) instead, when a setting is missing or invalid.
@@ -174,6 +176,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Response headers and request IDs
+
+To get a response's status and headers along with its data, send a request with `send_with_response` instead of `send`. It returns an [`ApiResponse`](https://docs.rs/turbopuffer/latest/turbopuffer/struct.ApiResponse.html), whose `request_id` is the `X-Request-Id` the API echoes back:
+
+```rust no_run
+use turbopuffer::Client;
+use turbopuffer::types::{DistanceMetric, Row};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::builder()
+        .region("gcp-us-central1")
+        .build()?;
+
+    let response = client
+        .namespace("products")
+        .write()
+        .distance_metric(DistanceMetric::CosineDistance)
+        .upsert_rows([Row::new("2108ed60-6851-49a0-9016-8325434f3845")
+            .vector([0.1, 0.2])
+            .insert("name", "Red boots")
+            .insert("price", 34.99)])
+        .send_with_response()
+        .await?;
+    println!(
+        "request {:?} returned {:?}",
+        response.request_id(),
+        response.data
+    );
+
+    Ok(())
+}
+```
+
+A request can be sent with an ID of its own with its builder's `header` method. API errors have the same `request_id` method, and so do pages from list methods, each fetched by its own request, whether with `send` and `next_page` or with `into_page_stream`.
 
 ## Retries
 

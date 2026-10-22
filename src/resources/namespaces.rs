@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::client::Client;
 use crate::error::Result;
+use crate::response::ApiResponse;
 use crate::transport::{ApiRequest, RequestOptions, encode_path_segment};
 use crate::types::{
     AggregateBy, AttributeSchema, BranchFromNamespaceParams, Columns, CopyFromNamespaceOperation,
@@ -250,6 +251,12 @@ impl BranchFromRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<WriteResult>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for BranchFromRequest {
@@ -364,6 +371,12 @@ impl CopyFromRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<WriteResult>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for CopyFromRequest {
@@ -424,6 +437,12 @@ impl DeleteAllRequest {
     pub async fn send(self) -> Result<DeleteAllResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
+    }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<DeleteAllResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
     }
 }
 
@@ -651,6 +670,12 @@ impl ExplainQueryRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<ExplainQueryResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for ExplainQueryRequest {
@@ -715,6 +740,12 @@ impl HintCacheWarmRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<HintCacheWarmResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for HintCacheWarmRequest {
@@ -778,6 +809,12 @@ impl MetadataRequest {
     pub async fn send(self) -> Result<NamespaceMetadata> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
+    }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<NamespaceMetadata>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
     }
 }
 
@@ -900,6 +937,12 @@ impl MultiQueryRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<MultiQueryResult>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for MultiQueryRequest {
@@ -968,6 +1011,12 @@ impl PollCopyFromRequest {
     pub async fn send(self) -> Result<CopyFromNamespaceOperation> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
+    }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<CopyFromNamespaceOperation>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
     }
 }
 
@@ -1203,6 +1252,12 @@ impl QueryRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<QueryResult>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for QueryRequest {
@@ -1315,6 +1370,12 @@ impl RecallRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<RecallResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for RecallRequest {
@@ -1378,6 +1439,12 @@ impl SchemaRequest {
     pub async fn send(self) -> Result<SchemaResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
+    }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<SchemaResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
     }
 }
 
@@ -1496,6 +1563,12 @@ impl StartCopyFromRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<StartCopyFromResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for StartCopyFromRequest {
@@ -1587,6 +1660,12 @@ impl UpdateMetadataRequest {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
     }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<NamespaceMetadata>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
+    }
 }
 
 impl IntoFuture for UpdateMetadataRequest {
@@ -1658,6 +1737,12 @@ impl UpdateSchemaRequest {
     pub async fn send(self) -> Result<UpdateSchemaResponse> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
+    }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<UpdateSchemaResponse>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
     }
 }
 
@@ -1939,6 +2024,12 @@ impl WriteRequest {
     pub async fn send(self) -> Result<WriteResult> {
         let (client, request) = self.into_parts()?;
         client.execute(request).await
+    }
+
+    /// Sends the request, returning the response's data along with its status, headers, and request ID.
+    pub async fn send_with_response(self) -> Result<ApiResponse<WriteResult>> {
+        let (client, request) = self.into_parts()?;
+        client.execute_with_response(request).await
     }
 }
 

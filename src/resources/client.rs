@@ -122,6 +122,20 @@ impl NamespacesRequest {
             Err(err) => crate::pagination::error_stream(err),
         }
     }
+
+    /// Returns a stream of every page of results, fetching pages as needed. Each page has the details of the response
+    /// it came in, like its request ID.
+    pub fn into_page_stream(self) -> Paginator<CursorPage<NamespaceSummary>> {
+        match self.into_parts() {
+            Ok((client, request)) => crate::pagination::cursor_page_stream(
+                client,
+                request,
+                "cursor",
+                parse_namespaces_page,
+            ),
+            Err(err) => crate::pagination::error_stream(err),
+        }
+    }
 }
 
 impl IntoFuture for NamespacesRequest {

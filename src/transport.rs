@@ -19,6 +19,7 @@ use serde::de::DeserializeOwned;
 use crate::client::Client;
 use crate::error::{ApiError, Error, Result};
 use crate::observer::{Observation, RequestInfo};
+use crate::response::ApiResponse;
 
 /// The longest `Retry-After` the client will honor. Longer values fall back to exponential backoff.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
@@ -133,24 +134,34 @@ impl Client {
         &self,
         request: ApiRequest,
     ) -> Result<T> {
+        self.execute_with_response(request)
+            .await
+            .map(ApiResponse::into_data)
+    }
+
+    /// Like [`execute`](Self::execute), but keeps the response's status and headers.
+    pub(crate) async fn execute_with_response<T: DeserializeOwned + 'static>(
+        &self,
+        request: ApiRequest,
+    ) -> Result<ApiResponse<T>> {
         let mut observation = self.observe(&request);
         let result = self
             .send_and_parse(&request, &mut observation, decode::<T>)
             .await;
         match &result {
-            Ok(value) => observation.finish(Some(value as &dyn Any), None),
+            Ok(response) => observation.finish(Some(&response.data as &dyn Any), None),
             Err(err) => observation.finish(None, Some(err)),
         }
         result
     }
 
-    /// Sends a request and parses its response body with `parse`.
+    /// Sends a request and parses its response body with `parse`, keeping the response's status and headers.
     #[allow(dead_code)]
     pub(crate) async fn execute_with<T>(
         &self,
         request: ApiRequest,
         parse: impl FnOnce(&[u8]) -> Result<T>,
-    ) -> Result<T> {
+    ) -> Result<ApiResponse<T>> {
         let mut observation = self.observe(&request);
         let result = self.send_and_parse(&request, &mut observation, parse).await;
         observation.finish(None, result.as_ref().err());
@@ -160,10 +171,21 @@ impl Client {
     /// Sends a request and returns its raw response body.
     #[allow(dead_code)]
     pub(crate) async fn execute_bytes(&self, request: ApiRequest) -> Result<Bytes> {
+        self.execute_bytes_with_response(request)
+            .await
+            .map(ApiResponse::into_data)
+    }
+
+    /// Like [`execute_bytes`](Self::execute_bytes), but keeps the response's status and headers.
+    #[allow(dead_code)]
+    pub(crate) async fn execute_bytes_with_response(
+        &self,
+        request: ApiRequest,
+    ) -> Result<ApiResponse<Bytes>> {
         let mut observation = self.observe(&request);
         let result = self.send_and_read(&request, &mut observation).await;
         match &result {
-            Ok(bytes) => observation.finish(Some(bytes as &dyn Any), None),
+            Ok(response) => observation.finish(Some(&response.data as &dyn Any), None),
             Err(err) => observation.finish(None, Some(err)),
         }
         result
@@ -172,13 +194,24 @@ impl Client {
     /// Sends a request, ignoring any response body.
     #[allow(dead_code)]
     pub(crate) async fn execute_empty(&self, request: ApiRequest) -> Result<()> {
+        self.execute_empty_with_response(request)
+            .await
+            .map(ApiResponse::into_data)
+    }
+
+    /// Like [`execute_empty`](Self::execute_empty), but keeps the response's status and headers.
+    #[allow(dead_code)]
+    pub(crate) async fn execute_empty_with_response(
+        &self,
+        request: ApiRequest,
+    ) -> Result<ApiResponse<()>> {
         let mut observation = self.observe(&request);
         let result = self
             .send_with_retries(&request, &mut observation)
             .await
-            .map(drop);
+            .map(|response| ApiResponse::new((), response.status(), response.headers().clone()));
         match &result {
-            Ok(()) => observation.finish(Some(&() as &dyn Any), None),
+            Ok(_) => observation.finish(Some(&() as &dyn Any), None),
             Err(err) => observation.finish(None, Some(err)),
         }
         result
@@ -207,18 +240,25 @@ impl Client {
         request: &ApiRequest,
         observation: &mut Observation,
         parse: impl FnOnce(&[u8]) -> Result<T>,
-    ) -> Result<T> {
-        let bytes = self.send_and_read(request, observation).await?;
+    ) -> Result<ApiResponse<T>> {
+        let response = self.send_and_read(request, observation).await?;
         observation.deserialize_begin();
-        parse(&bytes)
+        let data = parse(&response.data)?;
+        Ok(ApiResponse::new(data, response.status, response.headers))
     }
 
     async fn send_and_read(
         &self,
         request: &ApiRequest,
         observation: &mut Observation,
-    ) -> Result<Bytes> {
+    ) -> Result<ApiResponse<Bytes>> {
         let response = self.send_with_retries(request, observation).await?;
+        let (status, headers) = (response.status(), response.headers().clone());
+        let body = self.read_body(response, observation).await?;
+        Ok(ApiResponse::new(body, status, headers))
+    }
+
+    async fn read_body(&self, response: Response, observation: &mut Observation) -> Result<Bytes> {
         match response.bytes().await {
             Ok(bytes) => {
                 observation.body_end();
@@ -870,6 +910,105 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(err.is_timeout(), "expected a timeout, got {err:?}");
+        }
+
+        /// Responds with `status`, echoing the request's `X-Request-Id` like APIs that support request IDs.
+        fn echoing(status: u16) -> impl wiremock::Respond {
+            move |request: &wiremock::Request| {
+                let template = ResponseTemplate::new(status)
+                    .set_body_json(json!({ "ok": status < 400 }))
+                    .insert_header("x-custom", "value");
+                match request.headers.get("x-request-id") {
+                    Some(id) => template.insert_header("x-request-id", id.clone()),
+                    None => template,
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn keeps_response_statuses_headers_and_request_ids() {
+            let server = MockServer::start().await;
+            Mock::given(path("/thing"))
+                .respond_with(echoing(201))
+                .mount(&server)
+                .await;
+            let client = Client::for_tests(&server.uri());
+
+            let request = ApiRequest::new(reqwest::Method::GET, "/thing".to_owned())
+                .header("x-request-id", "req_123");
+            let response = client
+                .execute_with_response::<Value>(request)
+                .await
+                .unwrap();
+            assert_eq!(response.data, json!({ "ok": true }));
+            assert_eq!(response.status, 201);
+            assert_eq!(response.headers["x-custom"], "value");
+            assert_eq!(response.request_id(), Some("req_123"));
+
+            let request = ApiRequest::new(reqwest::Method::GET, "/thing".to_owned());
+            let response = client
+                .execute_with_response::<Value>(request)
+                .await
+                .unwrap();
+            assert_eq!(response.request_id(), None);
+        }
+
+        #[tokio::test]
+        async fn keeps_statuses_and_headers_of_empty_and_binary_responses() {
+            let server = MockServer::start().await;
+            Mock::given(path("/empty"))
+                .respond_with(ResponseTemplate::new(204).insert_header("x-request-id", "req_empty"))
+                .mount(&server)
+                .await;
+            Mock::given(path("/binary"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_bytes(b"raw".to_vec())
+                        .insert_header("x-request-id", "req_binary"),
+                )
+                .mount(&server)
+                .await;
+            let client = Client::for_tests(&server.uri());
+
+            let response = client
+                .execute_empty_with_response(ApiRequest::new(
+                    reqwest::Method::DELETE,
+                    "/empty".to_owned(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                (response.status.as_u16(), response.request_id()),
+                (204, Some("req_empty"))
+            );
+
+            let response = client
+                .execute_bytes_with_response(ApiRequest::new(
+                    reqwest::Method::GET,
+                    "/binary".to_owned(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(&response.data[..], b"raw");
+            assert_eq!(response.request_id(), Some("req_binary"));
+        }
+
+        #[tokio::test]
+        async fn api_errors_have_request_ids() {
+            let server = MockServer::start().await;
+            Mock::given(path("/thing"))
+                .respond_with(echoing(400))
+                .mount(&server)
+                .await;
+            let client = Client::for_tests(&server.uri());
+
+            let request = ApiRequest::new(reqwest::Method::GET, "/thing".to_owned())
+                .header("x-request-id", "req_123");
+            let err = client.execute::<Value>(request).await.unwrap_err();
+            assert_eq!(
+                err.as_api_error().and_then(|err| err.request_id()),
+                Some("req_123")
+            );
         }
 
         #[tokio::test]

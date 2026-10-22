@@ -124,6 +124,12 @@ impl ApiError {
         }
     }
 
+    /// The request's ID, from the `X-Request-Id` header the API echoes back. See
+    /// [`ApiResponse::request_id`](crate::ApiResponse::request_id).
+    pub fn request_id(&self) -> Option<&str> {
+        crate::response::request_id(&self.headers)
+    }
+
     /// Whether the client retries requests that fail with this error: `408`, `409`, `429`, and `5xx` statuses,
     /// unless the API says otherwise with an `x-should-retry` header.
     pub fn is_retryable(&self) -> bool {

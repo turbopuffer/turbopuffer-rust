@@ -2,7 +2,9 @@
 //!
 //! List methods return a [`CursorPage`] for the first page of results, which can fetch subsequent pages with
 //! [`CursorPage::next_page`]. To iterate over every item across all pages, use the request builder's
-//! `into_stream` method (or [`CursorPage::into_stream`]), which fetches pages as needed.
+//! `into_stream` method (or [`CursorPage::into_stream`]), which fetches pages as needed. To iterate over the pages
+//! themselves, along with the details of the responses they came in, like their request IDs, use `into_page_stream`
+//! (or [`CursorPage::into_page_stream`]).
 
 use std::fmt;
 use std::pin::Pin;
@@ -10,6 +12,8 @@ use std::task::{Context, Poll};
 
 use futures_core::Stream;
 use futures_util::stream::{self, BoxStream, StreamExt};
+use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 
 use crate::client::Client;
@@ -23,6 +27,10 @@ pub(crate) type ParsePage<T> = fn(&[u8]) -> serde_json::Result<(Vec<T>, Option<S
 pub struct CursorPage<T> {
     items: Vec<T>,
     next_cursor: Option<String>,
+    /// The status of the response the page came in.
+    status: StatusCode,
+    /// The headers of the response the page came in.
+    headers: HeaderMap,
     fetcher: PageFetcher<T>,
 }
 
@@ -59,6 +67,22 @@ impl<T> CursorPage<T> {
     /// The cursor identifying the next page, if any.
     pub fn next_cursor(&self) -> Option<&str> {
         self.next_cursor.as_deref()
+    }
+
+    /// The HTTP status code of the response this page came in.
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    /// The headers of the response this page came in.
+    pub fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    /// The ID of the request that fetched this page, from the `X-Request-Id` header the API echoes back. Each page is
+    /// fetched by its own request. See [`ApiResponse::request_id`](crate::ApiResponse::request_id).
+    pub fn request_id(&self) -> Option<&str> {
+        crate::response::request_id(&self.headers)
     }
 
     /// Whether there's another page after this one.
@@ -100,6 +124,25 @@ impl<T: DeserializeOwned + Send + 'static> CursorPage<T> {
             inner: stream.boxed(),
         }
     }
+
+    /// Returns a stream of this page followed by all subsequent pages, which are fetched as the stream is consumed.
+    ///
+    /// Unlike [`into_stream`](Self::into_stream), it yields whole pages, which have the details of the responses
+    /// they came in, like their [`request_id`](Self::request_id).
+    pub fn into_page_stream(self) -> Paginator<CursorPage<T>> {
+        let next = self.next_fetcher();
+        let rest = stream::try_unfold(next, |fetcher| async move {
+            let Some(fetcher) = fetcher else {
+                return Ok(None);
+            };
+            let page = fetcher.fetch().await?;
+            let next = page.next_fetcher();
+            Ok(Some((page, next)))
+        });
+        Paginator {
+            inner: stream::once(async move { Ok(self) }).chain(rest).boxed(),
+        }
+    }
 }
 
 impl<T> CursorPage<T> {
@@ -130,7 +173,7 @@ impl<T> CursorPage<T> {
 impl<T> PageFetcher<T> {
     async fn fetch(self) -> Result<CursorPage<T>> {
         let parse = self.parse;
-        let (items, next_cursor) = self
+        let response = self
             .client
             .execute_with(self.request.clone(), |bytes| {
                 parse(bytes).map_err(|source| Error::Decode {
@@ -139,9 +182,12 @@ impl<T> PageFetcher<T> {
                 })
             })
             .await?;
+        let (items, next_cursor) = response.data;
         Ok(CursorPage {
             items,
             next_cursor,
+            status: response.status,
+            headers: response.headers,
             fetcher: self,
         })
     }
@@ -173,7 +219,7 @@ struct PageState<T> {
     next: Option<PageFetcher<T>>,
 }
 
-/// A stream over every item of a paginated list, fetching pages as needed.
+/// A stream over every item of a paginated list, or over its pages, fetching pages as needed.
 ///
 /// Consume it with the combinators in [`futures::TryStreamExt`](https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html),
 /// e.g. `try_next` or `try_collect`.
@@ -227,6 +273,24 @@ pub(crate) fn cursor_stream<T: DeserializeOwned + Send + 'static>(
     let stream = stream::once(fetch_cursor_page(client, request, cursor_param, parse))
         .map(|page| match page {
             Ok(page) => page.into_stream(),
+            Err(err) => error_stream(err),
+        })
+        .flatten();
+    Paginator {
+        inner: stream.boxed(),
+    }
+}
+
+/// Returns a stream over every page of a cursor-paginated endpoint, starting from the first.
+pub(crate) fn cursor_page_stream<T: DeserializeOwned + Send + 'static>(
+    client: Client,
+    request: ApiRequest,
+    cursor_param: &'static str,
+    parse: ParsePage<T>,
+) -> Paginator<CursorPage<T>> {
+    let stream = stream::once(fetch_cursor_page(client, request, cursor_param, parse))
+        .map(|page| match page {
+            Ok(page) => page.into_page_stream(),
             Err(err) => error_stream(err),
         })
         .flatten();
@@ -307,6 +371,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pages_have_their_responses_headers() {
+        let server = MockServer::start().await;
+        for (cursor, body, request_id) in [
+            (None, json!({ "items": [1], "next_cursor": "a" }), "req_1"),
+            (
+                Some("a"),
+                json!({ "items": [2], "next_cursor": null }),
+                "req_2",
+            ),
+        ] {
+            let mock = Mock::given(path("/items"));
+            let mock = match cursor {
+                Some(cursor) => mock.and(query_param("cursor", cursor)),
+                None => mock.and(query_param_is_missing("cursor")),
+            };
+            let template = ResponseTemplate::new(200)
+                .set_body_json(body)
+                .insert_header("x-request-id", request_id);
+            mock.respond_with(template).mount(&server).await;
+        }
+        let client = Client::for_tests(&server.uri());
+
+        let page = fetch_cursor_page(client.clone(), request(), "cursor", parse)
+            .await
+            .unwrap();
+        assert_eq!(page.status(), reqwest::StatusCode::OK);
+        assert_eq!(page.request_id(), Some("req_1"));
+        assert_eq!(page.headers()["content-type"], "application/json");
+        let page = page.next_page().await.unwrap().unwrap();
+        assert_eq!(page.request_id(), Some("req_2"));
+
+        let streamed: Vec<Option<String>> = cursor_page_stream(client, request(), "cursor", parse)
+            .map_ok(|page| page.request_id().map(str::to_owned))
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            streamed,
+            [Some("req_1".to_owned()), Some("req_2".to_owned())]
+        );
+    }
+
+    #[tokio::test]
     async fn streams_every_item() {
         let server = paginated_server().await;
         let client = Client::for_tests(&server.uri());
@@ -317,6 +424,47 @@ mod tests {
             .unwrap();
         assert_eq!(items, [1, 2, 3, 4, 5]);
         assert_eq!(server.received_requests().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn streams_every_page() {
+        let server = paginated_server().await;
+        let client = Client::for_tests(&server.uri());
+
+        let pages: Vec<Vec<u32>> = cursor_page_stream(client.clone(), request(), "cursor", parse)
+            .map_ok(CursorPage::into_items)
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(pages, [vec![1, 2], vec![3, 4], vec![5]]);
+        assert_eq!(server.received_requests().await.unwrap().len(), 3);
+
+        // Streaming from a page that's already been fetched starts with it, without fetching it again.
+        let page = fetch_cursor_page(client, request(), "cursor", parse)
+            .await
+            .unwrap();
+        let pages: Vec<CursorPage<u32>> = page.into_page_stream().try_collect().await.unwrap();
+        assert_eq!(pages.len(), 3);
+        assert_eq!(server.received_requests().await.unwrap().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn streams_page_errors() {
+        let server = MockServer::start().await;
+        Mock::given(path("/items"))
+            .respond_with(ResponseTemplate::new(400))
+            .mount(&server)
+            .await;
+        let client = Client::for_tests(&server.uri());
+
+        let result: Result<Vec<CursorPage<u32>>> =
+            cursor_page_stream(client, request(), "cursor", parse)
+                .try_collect()
+                .await;
+        assert_eq!(
+            result.unwrap_err().status(),
+            Some(reqwest::StatusCode::BAD_REQUEST)
+        );
     }
 
     #[tokio::test]
