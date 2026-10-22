@@ -16,7 +16,10 @@ pub use crate::resources::namespaces::Namespace;
 
 // Re-exported so that applications can use the exact versions this crate was built with, e.g. to configure a
 // `reqwest::Client` for `ClientBuilder::http_client`, to build JSON values with `serde_json::json!`, or to
-// pass datetimes as free-form values.
+// work with datetime fields.
+//
+// Datetimes in free-form values don't need `jiff`, and can be any type that serializes to the format the API
+// expects.
 pub use jiff;
 pub use reqwest;
 pub use serde_json;

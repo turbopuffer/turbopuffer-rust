@@ -5,9 +5,13 @@
 //! they already hold, so calling one again adds more items rather than replacing them.
 //!
 //! Free-form values, like a filter's value or a row's attributes, take anything that implements
-//! `serde::Serialize`: numbers, strings, `serde_json::Value`s, `jiff` timestamps, and your own types. They
-//! panic if a value fails to serialize, like `serde_json::json!` does, which only happens for maps with keys
-//! that aren't strings or numbers, or `Serialize` implementations that return errors.
+//! `serde::Serialize`, like numbers, strings, `serde_json::Value`s, and your own types, and are sent as
+//! whatever JSON they serialize to. Datetimes don't need a particular type: pass anything that serializes to
+//! the format the API expects, like a `chrono::DateTime` or a `jiff::Timestamp`, which both serialize to
+//! RFC 3339 strings, or a `String` you've formatted yourself.
+//!
+//! Free-form values panic if they fail to serialize, like `serde_json::json!` does, which only happens for
+//! maps with keys that aren't strings or numbers, or `Serialize` implementations that return errors.
 
 mod namespaces;
 mod shared;
