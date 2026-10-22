@@ -1,5 +1,8 @@
 //! Request execution: building HTTP requests, retrying failures, and decoding responses.
 
+// Custom code, declared above the imports so that generated imports can change without conflicting with it.
+mod respond_async;
+
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
@@ -19,8 +22,6 @@ use serde::de::DeserializeOwned;
 use crate::client::Client;
 use crate::error::{ApiError, Error, Result};
 use crate::observer::{Observation, RequestInfo};
-
-mod respond_async;
 
 /// The longest `Retry-After` the client will honor. Longer values fall back to exponential backoff.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
