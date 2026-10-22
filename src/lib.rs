@@ -3,14 +3,16 @@
 #![warn(missing_debug_implementations)]
 
 mod client;
-mod custom;
 mod error;
 mod observer;
 pub mod pagination;
 pub mod resources;
-mod row;
 mod transport;
 pub mod types;
+
+// Hand-written modules, in a group of their own so that generated modules can be added without conflicting with them.
+mod custom;
+mod row;
 
 pub use crate::client::{Client, ClientBuilder};
 pub use crate::error::{ApiError, ApiErrorKind, BuildError, Error, Result};

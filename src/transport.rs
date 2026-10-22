@@ -221,10 +221,6 @@ impl Client {
         observation: &mut Observation,
     ) -> Result<Bytes> {
         let response = self.send_with_retries(request, observation).await?;
-        self.response_body(request, response, observation).await
-    }
-
-    async fn read_body(&self, response: Response, observation: &mut Observation) -> Result<Bytes> {
         match response.bytes().await {
             Ok(bytes) => {
                 observation.body_end();
@@ -267,7 +263,8 @@ impl Client {
                 Ok(response) => {
                     observation.attempt_response(&response);
                     if response.status().is_success() {
-                        return Ok(response);
+                        // Custom code: waits for requests the API runs in the background. See `respond_async`.
+                        return self.await_operation(request, response, observation).await;
                     }
                     if attempt >= max_retries
                         || !should_retry(response.status(), response.headers())

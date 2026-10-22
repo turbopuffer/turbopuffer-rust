@@ -8,12 +8,17 @@
 //! request's timeout runs out, but the operation carries on in the background, and the error has its token (see
 //! there for checking on it). Setting a `prefer` header on a request or client opts out.
 //!
+//! The transport hands every successful response to [`Client::await_operation`] as soon as it arrives, which
+//! swaps a `202`'s body for the operation's result, so the rest of the transport reads it like any other
+//! response. That keeps the custom code out of the generated code that reads response bodies, so that generator
+//! changes there don't conflict with it.
+//!
 //! See <https://turbopuffer.com/docs/api-overview#asynchronous-requests>.
 
 use std::time::Duration;
 
 use bytes::Bytes;
-use reqwest::header::{HeaderMap, LOCATION};
+use reqwest::header::{CONTENT_ENCODING, CONTENT_LENGTH, HeaderMap, LOCATION};
 use reqwest::{Response, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::Value;
@@ -38,20 +43,41 @@ const POLL_INTERVAL: Duration = if cfg!(test) {
 const POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl Client {
-    /// Returns a response's body, or if the API chose to run the request in the background, waits for the
-    /// operation to finish and returns its result.
-    pub(super) async fn response_body(
+    /// Returns a successful response as is, or if the API chose to run the request in the background, waits for
+    /// the operation to finish and returns a response with its result for a body. The response keeps the status
+    /// and headers of the one that started the operation, like its `X-Request-Id`.
+    pub(super) async fn await_operation(
+        &self,
+        request: &ApiRequest,
+        response: Response,
+        observation: &mut Observation,
+    ) -> Result<Response> {
+        if !responded_async(&response) {
+            return Ok(response);
+        }
+
+        let (status, mut headers) = (response.status(), response.headers().clone());
+        let body = self
+            .operation_result(request, response, observation)
+            .await?;
+        // These described the `202`'s own body.
+        headers.remove(CONTENT_LENGTH);
+        headers.remove(CONTENT_ENCODING);
+        let mut result = http::Response::new(body);
+        *result.status_mut() = status;
+        *result.headers_mut() = headers;
+        Ok(Response::from(result))
+    }
+
+    /// Waits for the operation that a `202 Accepted` response started to finish, returning its result.
+    async fn operation_result(
         &self,
         request: &ApiRequest,
         response: Response,
         observation: &mut Observation,
     ) -> Result<Bytes> {
-        if !responded_async(&response) {
-            return self.read_body(response, observation).await;
-        }
-
         let location = location(&response);
-        let body = self.read_body(response, observation).await?;
+        let body = self.read_accepted_body(response, observation).await?;
         let location = location.map_err(|message| Error::Decode {
             source: serde::de::Error::custom(message),
             body: String::from_utf8_lossy(&body).into_owned(),
@@ -90,6 +116,22 @@ impl Client {
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             tokio::time::sleep(remaining.min(POLL_INTERVAL)).await;
+        }
+    }
+
+    /// Reads the body of the response that started an operation. Its timing is the request's body timing: the
+    /// response returned in its place is read afterwards, but the observer keeps the first time it's told about.
+    async fn read_accepted_body(
+        &self,
+        response: Response,
+        observation: &mut Observation,
+    ) -> Result<Bytes> {
+        match response.bytes().await {
+            Ok(bytes) => {
+                observation.body_end();
+                Ok(bytes)
+            }
+            Err(err) => Err(observation.body_failed(err)),
         }
     }
 
@@ -297,6 +339,45 @@ mod tests {
             };
             mock.mount(server).await;
         }
+    }
+
+    #[tokio::test]
+    async fn keeps_the_status_and_headers_of_responses_that_start_operations() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/namespaces/ns"))
+            .respond_with(accepted(OPERATION).insert_header("x-request-id", "req_1"))
+            .mount(&server)
+            .await;
+        mount_operation(
+            &server,
+            &[json!({
+                "status": "finished",
+                "result": { "success": { "status": "OK", "message": "namespace copied" } },
+            })],
+        )
+        .await;
+
+        let client = Client::for_tests(&server.uri());
+        let accepted = client
+            .inner
+            .http
+            .post(format!("{}/v2/namespaces/ns", server.uri()))
+            .send()
+            .await
+            .unwrap();
+        let response = client
+            .await_operation(&copy_request(), accepted, &mut Observation::inert())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(response.headers()["x-request-id"], "req_1");
+        assert!(response.headers().get(CONTENT_LENGTH).is_none());
+        let result: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+        assert_eq!(
+            result,
+            json!({ "status": "OK", "message": "namespace copied" })
+        );
     }
 
     #[tokio::test]
