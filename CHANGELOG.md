@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.2](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-23)
+
+
+### Chores
+
+* Encode vectors in a `before_send` hook instead of generated code ([#21](https://github.com/turbopuffer/turbopuffer-rust/issues/21)) ([b6f541f](https://github.com/turbopuffer/turbopuffer-rust/commit/b6f541f0f0e8568001b05cc0db291bf193e6fc42))
+
 ## [0.1.0-beta.1](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-alpha.2...v0.1.0-beta.1) (2026-10-23)
 
 
