@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-beta.1](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-alpha.2...v0.1.0-beta.1) (2026-10-23)
+
+
+### Chores
+
+* Release 0.1.0-beta.1 ([#19](https://github.com/turbopuffer/turbopuffer-rust/issues/19)) ([e66cefd](https://github.com/turbopuffer/turbopuffer-rust/commit/e66cefdecdb1dcc35ae596b92634eb77075ccc03))
+
 ## [0.1.0-alpha.2](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2026-10-22)
 
 
