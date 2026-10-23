@@ -23,6 +23,9 @@ use crate::types::{
     UpdateSchemaResponse, VectorEncoding, WriteResult,
 };
 
+#[allow(unused_imports)]
+use crate::transport::BeforeSend;
+
 /// A handle to a single namespace, returned by [`Client::namespace`].
 ///
 /// Creating a handle doesn't make any requests. It's cheap to create and clone.
@@ -205,8 +208,8 @@ pub struct BranchFromRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct BranchFromBody {
-    source_namespace: String,
+pub(crate) struct BranchFromBody {
+    pub(crate) source_namespace: String,
 }
 
 impl BranchFromRequest {
@@ -237,7 +240,8 @@ impl BranchFromRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}",
             encode_path_segment("namespace", &self.namespace)?
@@ -285,14 +289,14 @@ pub struct CopyFromRequest {
 }
 
 #[derive(Clone, Serialize)]
-struct CopyFromBody {
-    source_namespace: String,
+pub(crate) struct CopyFromBody {
+    pub(crate) source_namespace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dest_encryption: Option<Encryption>,
+    pub(crate) dest_encryption: Option<Encryption>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source_api_key: Option<String>,
+    pub(crate) source_api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source_region: Option<String>,
+    pub(crate) source_region: Option<String>,
 }
 
 impl std::fmt::Debug for CopyFromBody {
@@ -360,7 +364,8 @@ impl CopyFromRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}",
             encode_path_segment("namespace", &self.namespace)?
@@ -478,33 +483,33 @@ pub struct ExplainQueryRequest {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-struct ExplainQueryBody {
+pub(crate) struct ExplainQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    aggregate_by: Option<BTreeMap<String, AggregateBy>>,
+    pub(crate) aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_attributes: Option<BTreeMap<String, Expr>>,
+    pub(crate) compute_attributes: Option<BTreeMap<String, Expr>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    consistency: Option<QueryConfigConsistency>,
+    pub(crate) consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    distance_metric: Option<DistanceMetric>,
+    pub(crate) distance_metric: Option<DistanceMetric>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    exclude_attributes: Option<Vec<String>>,
+    pub(crate) exclude_attributes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    filters: Option<Filter>,
+    pub(crate) filters: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    group_by: Option<Vec<GroupBy>>,
+    pub(crate) group_by: Option<Vec<GroupBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    include_attributes: Option<IncludeAttributes>,
+    pub(crate) include_attributes: Option<IncludeAttributes>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    limit: Option<QueryLimit>,
+    pub(crate) limit: Option<QueryLimit>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    offset: Option<u64>,
+    pub(crate) offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rank_by: Option<RankBy>,
+    pub(crate) rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<u64>,
+    pub(crate) top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    vector_encoding: Option<VectorEncoding>,
+    pub(crate) vector_encoding: Option<VectorEncoding>,
 }
 
 impl ExplainQueryRequest {
@@ -663,7 +668,8 @@ impl ExplainQueryRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}/explain_query",
             encode_path_segment("namespace", &self.namespace)?
@@ -850,18 +856,18 @@ pub struct MultiQueryRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct MultiQueryBody {
-    queries: Vec<Query>,
+pub(crate) struct MultiQueryBody {
+    pub(crate) queries: Vec<Query>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    consistency: Option<QueryConfigConsistency>,
+    pub(crate) consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    limit: Option<MultiQueryLimit>,
+    pub(crate) limit: Option<MultiQueryLimit>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    offset: Option<u64>,
+    pub(crate) offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rerank_by: Option<RerankBy>,
+    pub(crate) rerank_by: Option<RerankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    vector_encoding: Option<VectorEncoding>,
+    pub(crate) vector_encoding: Option<VectorEncoding>,
 }
 
 impl MultiQueryRequest {
@@ -929,7 +935,8 @@ impl MultiQueryRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}/query",
             encode_path_segment("namespace", &self.namespace)?
@@ -1052,35 +1059,35 @@ pub struct QueryRequest {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-struct QueryBody {
+pub(crate) struct QueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    aggregate_by: Option<BTreeMap<String, AggregateBy>>,
+    pub(crate) aggregate_by: Option<BTreeMap<String, AggregateBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_attributes: Option<BTreeMap<String, Expr>>,
+    pub(crate) compute_attributes: Option<BTreeMap<String, Expr>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    consistency: Option<QueryConfigConsistency>,
+    pub(crate) consistency: Option<QueryConfigConsistency>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    distance_metric: Option<DistanceMetric>,
+    pub(crate) distance_metric: Option<DistanceMetric>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    exclude_attributes: Option<Vec<String>>,
+    pub(crate) exclude_attributes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    filters: Option<Filter>,
+    pub(crate) filters: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    group_by: Option<Vec<GroupBy>>,
+    pub(crate) group_by: Option<Vec<GroupBy>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    include_attributes: Option<IncludeAttributes>,
+    pub(crate) include_attributes: Option<IncludeAttributes>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    limit: Option<QueryLimit>,
+    pub(crate) limit: Option<QueryLimit>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    offset: Option<u64>,
+    pub(crate) offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rank_by: Option<RankBy>,
+    pub(crate) rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rerank_by: Option<RerankModelParams>,
+    pub(crate) rerank_by: Option<RerankModelParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<u64>,
+    pub(crate) top_k: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    vector_encoding: Option<VectorEncoding>,
+    pub(crate) vector_encoding: Option<VectorEncoding>,
 }
 
 impl QueryRequest {
@@ -1245,7 +1252,8 @@ impl QueryRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}/query",
             encode_path_segment("namespace", &self.namespace)?
@@ -1292,17 +1300,17 @@ pub struct RecallRequest {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-struct RecallBody {
+pub(crate) struct RecallBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    filters: Option<Filter>,
+    pub(crate) filters: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    include_ground_truth: Option<bool>,
+    pub(crate) include_ground_truth: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    num: Option<u64>,
+    pub(crate) num: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rank_by: Option<RankBy>,
+    pub(crate) rank_by: Option<RankBy>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<u64>,
+    pub(crate) top_k: Option<u64>,
 }
 
 impl RecallRequest {
@@ -1363,7 +1371,8 @@ impl RecallRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v1/namespaces/{}/_debug/recall",
             encode_path_segment("namespace", &self.namespace)?
@@ -1480,14 +1489,14 @@ pub struct StartCopyFromRequest {
 }
 
 #[derive(Clone, Serialize)]
-struct StartCopyFromBody {
-    source_namespace: String,
+pub(crate) struct StartCopyFromBody {
+    pub(crate) source_namespace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dest_encryption: Option<Encryption>,
+    pub(crate) dest_encryption: Option<Encryption>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source_api_key: Option<String>,
+    pub(crate) source_api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source_region: Option<String>,
+    pub(crate) source_region: Option<String>,
 }
 
 impl std::fmt::Debug for StartCopyFromBody {
@@ -1555,7 +1564,8 @@ impl StartCopyFromRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}/async",
             encode_path_segment("namespace", &self.namespace)?
@@ -1603,11 +1613,11 @@ pub struct UpdateMetadataRequest {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-struct UpdateMetadataBody {
+pub(crate) struct UpdateMetadataBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pinning: Option<NamespaceMetadataPatchPinning>,
+    pub(crate) pinning: Option<NamespaceMetadataPatchPinning>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    read_only: Option<bool>,
+    pub(crate) read_only: Option<bool>,
 }
 
 impl UpdateMetadataRequest {
@@ -1653,7 +1663,8 @@ impl UpdateMetadataRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v1/namespaces/{}/metadata",
             encode_path_segment("namespace", &self.namespace)?
@@ -1731,7 +1742,8 @@ impl UpdateSchemaRequest {
         self
     }
 
-    fn into_parts(self) -> Result<(Client, ApiRequest)> {
+    fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
+        self.body.before_send();
         let path = format!(
             "/v1/namespaces/{}/schema",
             encode_path_segment("namespace", &self.namespace)?
@@ -1778,49 +1790,49 @@ pub struct WriteRequest {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-struct WriteBody {
+pub(crate) struct WriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    branch_from_namespace: Option<BranchFromNamespaceParams>,
+    pub(crate) branch_from_namespace: Option<BranchFromNamespaceParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    copy_from_namespace: Option<CopyFromNamespaceParams>,
+    pub(crate) copy_from_namespace: Option<CopyFromNamespaceParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    create_namespace: Option<bool>,
+    pub(crate) create_namespace: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    delete_by_filter: Option<Filter>,
+    pub(crate) delete_by_filter: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    delete_by_filter_allow_partial: Option<bool>,
+    pub(crate) delete_by_filter_allow_partial: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    delete_condition: Option<Filter>,
+    pub(crate) delete_condition: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    deletes: Option<Vec<Id>>,
+    pub(crate) deletes: Option<Vec<Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    disable_backpressure: Option<bool>,
+    pub(crate) disable_backpressure: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    distance_metric: Option<DistanceMetric>,
+    pub(crate) distance_metric: Option<DistanceMetric>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    encryption: Option<Encryption>,
+    pub(crate) encryption: Option<Encryption>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    patch_by_filter: Option<PatchByFilter>,
+    pub(crate) patch_by_filter: Option<PatchByFilter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    patch_by_filter_allow_partial: Option<bool>,
+    pub(crate) patch_by_filter_allow_partial: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    patch_columns: Option<Columns>,
+    pub(crate) patch_columns: Option<Columns>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    patch_condition: Option<Filter>,
+    pub(crate) patch_condition: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    patch_rows: Option<Vec<Row>>,
+    pub(crate) patch_rows: Option<Vec<Row>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    return_affected_ids: Option<bool>,
+    pub(crate) return_affected_ids: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    schema: Option<BTreeMap<String, AttributeSchema>>,
+    pub(crate) schema: Option<BTreeMap<String, AttributeSchema>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    sharding: Option<ShardingConfig>,
+    pub(crate) sharding: Option<ShardingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    upsert_columns: Option<Columns>,
+    pub(crate) upsert_columns: Option<Columns>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    upsert_condition: Option<Filter>,
+    pub(crate) upsert_condition: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    upsert_rows: Option<Vec<Row>>,
+    pub(crate) upsert_rows: Option<Vec<Row>>,
 }
 
 impl WriteRequest {
@@ -2022,11 +2034,7 @@ impl WriteRequest {
     }
 
     fn into_parts(mut self) -> Result<(Client, ApiRequest)> {
-        crate::custom::vectors::encode_upserts(
-            self.body.schema.as_ref(),
-            self.body.upsert_rows.as_mut(),
-            self.body.upsert_columns.as_mut(),
-        );
+        self.body.before_send();
         let path = format!(
             "/v2/namespaces/{}",
             encode_path_segment("namespace", &self.namespace)?

@@ -517,6 +517,22 @@ fn random_fraction() -> f64 {
     (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
 
+/// A hook that runs on a request's body just before it's serialized, so custom code can change what's sent, e.g.
+/// to encode part of it more compactly.
+///
+/// Every type gets this no-op `before_send`. Custom code hooks a request by giving its body type an inherent
+/// `pub(crate) fn before_send(&mut self)`, which requests call instead because Rust prefers inherent methods to
+/// trait methods. That keeps the hook out of generated files, so regenerating them can't conflict with it.
+///
+/// This is mainly for internal use by the SDK's own custom code, and isn't a public contract. It may change or be
+/// removed in a future version of the generator.
+#[allow(dead_code)]
+pub(crate) trait BeforeSend {
+    fn before_send(&mut self) {}
+}
+
+impl<T: ?Sized> BeforeSend for T {}
+
 /// Percent-encodes the value of path parameter `name` for use as a single path segment.
 ///
 /// Errors if the value is empty, `.`, or `..`. `Url` resolves dot segments, so `/things/..` would go to `/`, and

@@ -11,11 +11,23 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use crate::resources::namespaces::WriteBody;
 use crate::types::{Ann, AttributeSchema, Columns, ColumnsVector, Row, Vector};
+
+impl WriteBody {
+    /// Hooks writes (see `BeforeSend` in `transport.rs`) to encode their vectors.
+    pub(crate) fn before_send(&mut self) {
+        encode_upserts(
+            self.schema.as_ref(),
+            self.upsert_rows.as_mut(),
+            self.upsert_columns.as_mut(),
+        );
+    }
+}
 
 /// Base64-encodes the vectors that a write upserts: the `vector` attribute, and any other attribute that the
 /// write's `schema` gives an ANN index, except for vector arrays (`[]` types), which don't take base64 yet.
-pub(crate) fn encode_upserts(
+fn encode_upserts(
     schema: Option<&BTreeMap<String, AttributeSchema>>,
     rows: Option<&mut Vec<Row>>,
     columns: Option<&mut Columns>,
