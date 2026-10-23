@@ -22,7 +22,6 @@ use reqwest::header::{CONTENT_ENCODING, CONTENT_LENGTH, HeaderMap, LOCATION};
 use reqwest::{Response, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::Value;
-use tokio::time::Instant;
 
 use super::{ApiRequest, decode, retry_after, should_retry};
 use crate::client::Client;
@@ -83,40 +82,37 @@ impl Client {
             body: String::from_utf8_lossy(&body).into_owned(),
         })?;
 
-        let deadline = Instant::now() + request.options.timeout.unwrap_or(self.inner.timeout);
+        let timeout = request.options.timeout.unwrap_or(self.inner.timeout);
         let max_retries = request
             .options
             .max_retries
             .unwrap_or(self.inner.max_retries);
-        // Once the client stops waiting, the operation carries on, so the error says how to find it.
-        let timed_out = || Error::OperationTimeout {
-            token: operation_token(&location),
-            location: location.to_string(),
+        let mut headers = self.inner.headers.clone();
+        headers.remove(PREFER);
+
+        let wait = async {
+            loop {
+                let body = self.poll(&location, &headers, max_retries).await?;
+                match decode::<Operation>(&body)? {
+                    Operation::Running {} => {}
+                    Operation::Finished {
+                        result: OperationResult::Success(result),
+                    } => return Ok(serde_json::to_vec(&result).map_err(Error::Json)?.into()),
+                    Operation::Finished {
+                        result: OperationResult::Error(error),
+                    } => return Err(error.into_api_error(&body)?.into()),
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
         };
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(timed_out());
-            }
-            let body = match self
-                .poll(&location, remaining.min(POLL_TIMEOUT), max_retries)
-                .await
-            {
-                Err(Error::Timeout) => return Err(timed_out()),
-                result => result?,
-            };
-            match decode::<Operation>(&body)? {
-                Operation::Running {} => {}
-                Operation::Finished {
-                    result: OperationResult::Success(result),
-                } => return Ok(serde_json::to_vec(&result).map_err(Error::Json)?.into()),
-                Operation::Finished {
-                    result: OperationResult::Error(error),
-                } => return Err(error.into_api_error(&body)?.into()),
-            }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            tokio::time::sleep(remaining.min(POLL_INTERVAL)).await;
-        }
+        tokio::time::timeout(timeout, wait)
+            .await
+            .unwrap_or_else(|_| {
+                Err(Error::OperationTimeout {
+                    token: operation_token(&location),
+                    location: location.to_string(),
+                })
+            })
     }
 
     /// Reads the body of the response that started an operation. Its timing is the request's body timing: the
@@ -136,17 +132,14 @@ impl Client {
     }
 
     /// Fetches an operation's status, retrying failures like any other request.
-    async fn poll(&self, location: &Url, timeout: Duration, max_retries: u32) -> Result<Bytes> {
-        let mut headers = self.inner.headers.clone();
-        headers.remove(PREFER);
-
+    async fn poll(&self, location: &Url, headers: &HeaderMap, max_retries: u32) -> Result<Bytes> {
         let mut attempt = 0;
         loop {
             let result = self
                 .inner
                 .http
                 .get(location.clone())
-                .timeout(timeout)
+                .timeout(POLL_TIMEOUT)
                 .headers(headers.clone())
                 .send()
                 .await;
@@ -496,6 +489,31 @@ mod tests {
         };
         assert_eq!(token, "tpuf-job-1");
         assert_eq!(location, format!("{}{OPERATION}", server.uri()));
+    }
+
+    #[tokio::test]
+    async fn stops_retrying_polls_at_the_deadline() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(accepted(OPERATION))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503).insert_header("retry-after", "10"))
+            .mount(&server)
+            .await;
+
+        let client = Client::for_tests(&server.uri());
+        let request = copy_request().options(RequestOptions {
+            timeout: Some(Duration::from_millis(100)),
+            ..Default::default()
+        });
+        // Waiting out the `retry-after` would run well past the request's timeout.
+        let err = tokio::time::timeout(Duration::from_secs(1), client.execute::<Value>(request))
+            .await
+            .expect("polled past the deadline")
+            .unwrap_err();
+        assert!(matches!(err, Error::OperationTimeout { .. }), "{err:?}");
     }
 
     #[test]
