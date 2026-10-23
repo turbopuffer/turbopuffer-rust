@@ -509,9 +509,19 @@ fn random_fraction() -> f64 {
     (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
 
-/// Percent-encodes a value for use as a single path segment.
+/// Percent-encodes the value of path parameter `name` for use as a single path segment.
+///
+/// Errors if the value is empty, `.`, or `..`. `Url` resolves dot segments, so `/things/..` would go to `/`, and
+/// encoding the dots doesn't help because it resolves percent-encoded ones too. An empty value would drop the
+/// segment, leaving e.g. `/things/`.
 #[allow(dead_code)]
-pub(crate) fn encode_path_segment(value: &str) -> String {
+pub(crate) fn encode_path_segment(name: &'static str, value: &str) -> Result<String> {
+    if matches!(value, "" | "." | "..") {
+        return Err(Error::InvalidPathParam {
+            name,
+            value: value.to_owned(),
+        });
+    }
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
@@ -521,7 +531,7 @@ pub(crate) fn encode_path_segment(value: &str) -> String {
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
-    out
+    Ok(out)
 }
 
 fn os() -> &'static str {
@@ -553,9 +563,27 @@ mod tests {
 
     #[test]
     fn encodes_path_segments() {
-        assert_eq!(encode_path_segment("simple-name_1.0~"), "simple-name_1.0~");
-        assert_eq!(encode_path_segment("a/b c"), "a%2Fb%20c");
-        assert_eq!(encode_path_segment("ü"), "%C3%BC");
+        let encode = |value| encode_path_segment("id", value).unwrap();
+        assert_eq!(encode("simple-name_1.0~"), "simple-name_1.0~");
+        assert_eq!(encode("a/b c"), "a%2Fb%20c");
+        assert_eq!(encode("ü"), "%C3%BC");
+        assert_eq!(encode("..."), "...");
+        assert_eq!(encode(".a"), ".a");
+    }
+
+    #[test]
+    fn rejects_path_segments_that_change_the_path() {
+        for value in ["", ".", ".."] {
+            let err = encode_path_segment("id", value).unwrap_err();
+            assert!(
+                matches!(&err, Error::InvalidPathParam { name: "id", value: v } if v == value),
+                "{err:?}"
+            );
+        }
+        assert_eq!(
+            encode_path_segment("id", "..").unwrap_err().to_string(),
+            r#"path parameter `id` can't be "..""#
+        );
     }
 
     #[test]
@@ -668,7 +696,10 @@ mod tests {
             let client = Client::for_tests(&server.uri());
             let request = ApiRequest::new(
                 reqwest::Method::POST,
-                format!("/things/{}", super::encode_path_segment("a b")),
+                format!(
+                    "/things/{}",
+                    super::encode_path_segment("id", "a b").unwrap()
+                ),
             )
             .query(vec![("limit".to_owned(), "10".to_owned())])
             .json(&json!({ "name": "thing" }))

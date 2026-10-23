@@ -40,6 +40,16 @@ pub enum Error {
     #[error("failed to encode request body")]
     Encode(#[source] serde_json::Error),
 
+    /// A path parameter was empty, `.`, or `..`, so the request wasn't sent. These wouldn't fill in one segment of
+    /// the request's path but change which path it goes to, e.g. a request meant for `/things/..` would go to `/`.
+    #[error("path parameter `{name}` can't be {value:?}")]
+    InvalidPathParam {
+        /// The parameter's name in the API.
+        name: &'static str,
+        /// The value it was given.
+        value: String,
+    },
+
     /// A value couldn't be converted to or from JSON, e.g. by a type's `from_serializable` or `deserialize_as`.
     ///
     /// Converts from [`serde_json::Error`], so those conversions can use `?` in functions that return

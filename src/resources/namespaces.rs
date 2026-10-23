@@ -238,7 +238,10 @@ impl BranchFromRequest {
     }
 
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
-        let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
+        let path = format!(
+            "/v2/namespaces/{}",
+            encode_path_segment("namespace", &self.namespace)?
+        );
         let request = ApiRequest::new(Method::POST, path)
             .overload("branchFrom")
             .json(&BTreeMap::from([("branch_from_namespace", &self.body)]))?
@@ -358,7 +361,10 @@ impl CopyFromRequest {
     }
 
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
-        let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
+        let path = format!(
+            "/v2/namespaces/{}",
+            encode_path_segment("namespace", &self.namespace)?
+        );
         let request = ApiRequest::new(Method::POST, path)
             .overload("copyFrom")
             .json(&BTreeMap::from([("copy_from_namespace", &self.body)]))?
@@ -428,7 +434,10 @@ impl DeleteAllRequest {
     }
 
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
-        let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
+        let path = format!(
+            "/v2/namespaces/{}",
+            encode_path_segment("namespace", &self.namespace)?
+        );
         let request = ApiRequest::new(Method::DELETE, path).options(self.options);
         Ok((self.client, request))
     }
@@ -657,7 +666,7 @@ impl ExplainQueryRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v2/namespaces/{}/explain_query",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::POST, path)
             .json(&self.body)?
@@ -729,7 +738,7 @@ impl HintCacheWarmRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v1/namespaces/{}/hint_cache_warm",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::GET, path).options(self.options);
         Ok((self.client, request))
@@ -799,7 +808,7 @@ impl MetadataRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v2/namespaces/{}/metadata",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::GET, path).options(self.options);
         Ok((self.client, request))
@@ -923,7 +932,7 @@ impl MultiQueryRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v2/namespaces/{}/query",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::POST, path)
             .overload("multiQuery")
@@ -998,8 +1007,8 @@ impl PollCopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v1/namespaces/{}/operations/{}",
-            encode_path_segment(&self.namespace),
-            encode_path_segment(&self.token)
+            encode_path_segment("namespace", &self.namespace)?,
+            encode_path_segment("token", &self.token)?
         );
         let request = ApiRequest::new(Method::GET, path)
             .overload("pollCopyFrom")
@@ -1239,7 +1248,7 @@ impl QueryRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v2/namespaces/{}/query",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::POST, path)
             .json(&self.body)?
@@ -1357,7 +1366,7 @@ impl RecallRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v1/namespaces/{}/_debug/recall",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::POST, path)
             .json(&self.body)?
@@ -1429,7 +1438,7 @@ impl SchemaRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v1/namespaces/{}/schema",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::GET, path).options(self.options);
         Ok((self.client, request))
@@ -1549,7 +1558,7 @@ impl StartCopyFromRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v2/namespaces/{}/async",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::POST, path)
             .overload("startCopyFrom")
@@ -1647,7 +1656,7 @@ impl UpdateMetadataRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v1/namespaces/{}/metadata",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::PATCH, path)
             .json(&self.body)?
@@ -1725,7 +1734,7 @@ impl UpdateSchemaRequest {
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
         let path = format!(
             "/v1/namespaces/{}/schema",
-            encode_path_segment(&self.namespace)
+            encode_path_segment("namespace", &self.namespace)?
         );
         let request = ApiRequest::new(Method::POST, path)
             .json(&self.body)?
@@ -2013,7 +2022,10 @@ impl WriteRequest {
     }
 
     fn into_parts(self) -> Result<(Client, ApiRequest)> {
-        let path = format!("/v2/namespaces/{}", encode_path_segment(&self.namespace));
+        let path = format!(
+            "/v2/namespaces/{}",
+            encode_path_segment("namespace", &self.namespace)?
+        );
         let request = ApiRequest::new(Method::POST, path)
             .json(&self.body)?
             .options(self.options);
