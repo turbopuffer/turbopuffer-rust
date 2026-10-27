@@ -5,8 +5,8 @@
 //! long-running operations like `copy_from_namespace` and recall evaluation. It then responds with
 //! `202 Accepted` and a `location` to poll, which the client does until the operation finishes, returning its
 //! result as if the request had been synchronous. Polling stops with [`Error::OperationTimeout`] once the
-//! request's timeout runs out, but the operation carries on in the background, and the error has its token (see
-//! there for checking on it). Setting a `prefer` header on a request or client opts out.
+//! request's timeout runs out or polls keep timing out, but the operation carries on in the background, and the
+//! error has its token (see there for checking on it). Setting a `prefer` header on a request or client opts out.
 //!
 //! The transport hands every successful response to [`Client::await_operation`] as soon as it arrives, which
 //! swaps a `202`'s body for the operation's result, so the rest of the transport reads it like any other
@@ -38,8 +38,13 @@ const POLL_INTERVAL: Duration = if cfg!(test) {
     Duration::from_secs(1)
 };
 
-/// The longest a single poll can take.
-const POLL_TIMEOUT: Duration = Duration::from_secs(60);
+/// The longest a single poll can take. In tests, short enough that polls can run out of retries quickly, and
+/// well within the test client's 10s timeout.
+const POLL_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(250)
+} else {
+    Duration::from_secs(60)
+};
 
 impl Client {
     /// Returns a successful response as is, or if the API chose to run the request in the background, waits for
@@ -90,29 +95,39 @@ impl Client {
         let mut headers = self.inner.headers.clone();
         headers.remove(PREFER);
 
-        let wait = async {
-            loop {
-                let body = self.poll(&location, &headers, max_retries).await?;
-                match decode::<Operation>(&body)? {
-                    Operation::Running {} => {}
-                    Operation::Finished {
-                        result: OperationResult::Success(result),
-                    } => return Ok(serde_json::to_vec(&result).map_err(Error::Json)?.into()),
-                    Operation::Finished {
-                        result: OperationResult::Error(error),
-                    } => return Err(error.into_api_error(&body)?.into()),
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
+        let wait = self.poll_until_finished(&location, &headers, max_retries);
+        match tokio::time::timeout(timeout, wait).await {
+            // Once the client stops waiting, the operation carries on, so the error says how to find it. A plain
+            // `Timeout` would also read as safe to retry, which would start the operation again. (Polls that run
+            // out of retries on other errors still return those as they are.)
+            Ok(Err(Error::Timeout)) | Err(_) => Err(Error::OperationTimeout {
+                token: operation_token(&location),
+                location: location.to_string(),
+            }),
+            Ok(result) => result,
+        }
+    }
+
+    /// Polls an operation until it finishes, returning its result.
+    async fn poll_until_finished(
+        &self,
+        location: &Url,
+        headers: &HeaderMap,
+        max_retries: u32,
+    ) -> Result<Bytes> {
+        loop {
+            let body = self.poll(location, headers, max_retries).await?;
+            match decode::<Operation>(&body)? {
+                Operation::Running {} => {}
+                Operation::Finished {
+                    result: OperationResult::Success(result),
+                } => return Ok(serde_json::to_vec(&result).map_err(Error::Json)?.into()),
+                Operation::Finished {
+                    result: OperationResult::Error(error),
+                } => return Err(error.into_api_error(&body)?.into()),
             }
-        };
-        tokio::time::timeout(timeout, wait)
-            .await
-            .unwrap_or_else(|_| {
-                Err(Error::OperationTimeout {
-                    token: operation_token(&location),
-                    location: location.to_string(),
-                })
-            })
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
     }
 
     /// Reads the body of the response that started an operation. Its timing is the request's body timing: the
@@ -514,6 +529,35 @@ mod tests {
             .expect("polled past the deadline")
             .unwrap_err();
         assert!(matches!(err, Error::OperationTimeout { .. }), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn times_out_when_polls_keep_timing_out() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(accepted(OPERATION))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "status": "running" }))
+                    .set_delay(POLL_TIMEOUT * 10),
+            )
+            .mount(&server)
+            .await;
+
+        // The request's timeout outlasts every poll and its retries.
+        let client = Client::for_tests(&server.uri());
+        let err = client.execute::<Value>(copy_request()).await.unwrap_err();
+        let Error::OperationTimeout { ref token, .. } = err else {
+            panic!("expected an operation timeout, got {err:?}");
+        };
+        assert_eq!(token, "tpuf-job-1");
+        // Sending the request again would start another operation.
+        assert!(!err.is_retryable());
+        let polls = server.received_requests().await.unwrap();
+        assert_eq!(polls.iter().filter(|r| r.method == "GET").count(), 3);
     }
 
     #[test]

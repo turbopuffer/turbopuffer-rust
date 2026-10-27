@@ -165,8 +165,9 @@ impl ClientBuilder {
     /// The timeout for each request attempt. Defaults to 1 minute.
     ///
     /// When the API runs a request in the background, like a large `copy_from_namespace`, it's also how long the
-    /// client waits for it to finish, so long operations need a longer timeout. If it runs out, the request fails
-    /// with [`Error::OperationTimeout`](crate::Error::OperationTimeout), but the operation carries on.
+    /// client waits for it to finish once the request has been accepted, so long operations need a longer timeout.
+    /// If it runs out, or polls for the operation's status keep timing out, the request fails with
+    /// [`Error::OperationTimeout`](crate::Error::OperationTimeout), but the operation carries on.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
