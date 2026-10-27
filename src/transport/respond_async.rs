@@ -560,6 +560,34 @@ mod tests {
         assert_eq!(polls.iter().filter(|r| r.method == "GET").count(), 3);
     }
 
+    #[tokio::test]
+    async fn times_out_when_a_poll_times_out_with_the_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(accepted(OPERATION))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "status": "running" }))
+                    .set_delay(POLL_TIMEOUT * 10),
+            )
+            .mount(&server)
+            .await;
+
+        // Like the default 60s timeout, the request's timeout runs out in the same tick as its first poll's, and
+        // the poll's is the one seen first.
+        let client = Client::for_tests(&server.uri());
+        let request = copy_request().options(RequestOptions {
+            timeout: Some(POLL_TIMEOUT),
+            max_retries: Some(0),
+            ..Default::default()
+        });
+        let err = client.execute::<Value>(request).await.unwrap_err();
+        assert!(matches!(err, Error::OperationTimeout { .. }), "{err:?}");
+    }
+
     #[test]
     fn percent_decodes_operation_tokens() {
         let token = |location: &str| operation_token(&Url::parse(location).unwrap());
