@@ -5,8 +5,8 @@
 //! long-running operations like `copy_from_namespace` and recall evaluation. It then responds with
 //! `202 Accepted` and a `location` to poll, which the client does until the operation finishes, returning its
 //! result as if the request had been synchronous. Polling stops with [`Error::OperationTimeout`] once the
-//! request's timeout runs out, but the operation carries on in the background, and the error has its token (see
-//! there for checking on it). Setting a `prefer` header on a request or client opts out.
+//! request's timeout runs out or polls keep timing out, but the operation carries on in the background, and the
+//! error has its token (see there for checking on it). Setting a `prefer` header on a request or client opts out.
 //!
 //! The transport hands every successful response to [`Client::await_operation`] as soon as it arrives, which
 //! swaps a `202`'s body for the operation's result, so the rest of the transport reads it like any other
@@ -22,7 +22,6 @@ use reqwest::header::{CONTENT_ENCODING, CONTENT_LENGTH, HeaderMap, LOCATION};
 use reqwest::{Response, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::Value;
-use tokio::time::Instant;
 
 use super::{ApiRequest, decode, retry_after, should_retry};
 use crate::client::Client;
@@ -39,8 +38,13 @@ const POLL_INTERVAL: Duration = if cfg!(test) {
     Duration::from_secs(1)
 };
 
-/// The longest a single poll can take.
-const POLL_TIMEOUT: Duration = Duration::from_secs(60);
+/// The longest a single poll can take. In tests, short enough that polls can run out of retries quickly, and
+/// well within the test client's 10s timeout.
+const POLL_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(250)
+} else {
+    Duration::from_secs(60)
+};
 
 impl Client {
     /// Returns a successful response as is, or if the API chose to run the request in the background, waits for
@@ -83,28 +87,36 @@ impl Client {
             body: String::from_utf8_lossy(&body).into_owned(),
         })?;
 
-        let deadline = Instant::now() + request.options.timeout.unwrap_or(self.inner.timeout);
+        let timeout = request.options.timeout.unwrap_or(self.inner.timeout);
         let max_retries = request
             .options
             .max_retries
             .unwrap_or(self.inner.max_retries);
-        // Once the client stops waiting, the operation carries on, so the error says how to find it.
-        let timed_out = || Error::OperationTimeout {
-            token: operation_token(&location),
-            location: location.to_string(),
-        };
+        let mut headers = self.inner.headers.clone();
+        headers.remove(PREFER);
+
+        let wait = self.poll_until_finished(&location, &headers, max_retries);
+        match tokio::time::timeout(timeout, wait).await {
+            // Once the client stops waiting, the operation carries on, so the error says how to find it. A plain
+            // `Timeout` would also read as safe to retry, which would start the operation again. (Polls that run
+            // out of retries on other errors still return those as they are.)
+            Ok(Err(Error::Timeout)) | Err(_) => Err(Error::OperationTimeout {
+                token: operation_token(&location),
+                location: location.to_string(),
+            }),
+            Ok(result) => result,
+        }
+    }
+
+    /// Polls an operation until it finishes, returning its result.
+    async fn poll_until_finished(
+        &self,
+        location: &Url,
+        headers: &HeaderMap,
+        max_retries: u32,
+    ) -> Result<Bytes> {
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(timed_out());
-            }
-            let body = match self
-                .poll(&location, remaining.min(POLL_TIMEOUT), max_retries)
-                .await
-            {
-                Err(Error::Timeout) => return Err(timed_out()),
-                result => result?,
-            };
+            let body = self.poll(location, headers, max_retries).await?;
             match decode::<Operation>(&body)? {
                 Operation::Running {} => {}
                 Operation::Finished {
@@ -114,8 +126,7 @@ impl Client {
                     result: OperationResult::Error(error),
                 } => return Err(error.into_api_error(&body)?.into()),
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            tokio::time::sleep(remaining.min(POLL_INTERVAL)).await;
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
     }
 
@@ -136,17 +147,14 @@ impl Client {
     }
 
     /// Fetches an operation's status, retrying failures like any other request.
-    async fn poll(&self, location: &Url, timeout: Duration, max_retries: u32) -> Result<Bytes> {
-        let mut headers = self.inner.headers.clone();
-        headers.remove(PREFER);
-
+    async fn poll(&self, location: &Url, headers: &HeaderMap, max_retries: u32) -> Result<Bytes> {
         let mut attempt = 0;
         loop {
             let result = self
                 .inner
                 .http
                 .get(location.clone())
-                .timeout(timeout)
+                .timeout(POLL_TIMEOUT)
                 .headers(headers.clone())
                 .send()
                 .await;
@@ -496,6 +504,88 @@ mod tests {
         };
         assert_eq!(token, "tpuf-job-1");
         assert_eq!(location, format!("{}{OPERATION}", server.uri()));
+    }
+
+    #[tokio::test]
+    async fn stops_retrying_polls_at_the_deadline() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(accepted(OPERATION))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503).insert_header("retry-after", "10"))
+            .mount(&server)
+            .await;
+
+        let client = Client::for_tests(&server.uri());
+        let request = copy_request().options(RequestOptions {
+            timeout: Some(Duration::from_millis(100)),
+            ..Default::default()
+        });
+        // Waiting out the `retry-after` would run well past the request's timeout.
+        let err = tokio::time::timeout(Duration::from_secs(1), client.execute::<Value>(request))
+            .await
+            .expect("polled past the deadline")
+            .unwrap_err();
+        assert!(matches!(err, Error::OperationTimeout { .. }), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn times_out_when_polls_keep_timing_out() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(accepted(OPERATION))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "status": "running" }))
+                    .set_delay(POLL_TIMEOUT * 10),
+            )
+            .mount(&server)
+            .await;
+
+        // The request's timeout outlasts every poll and its retries.
+        let client = Client::for_tests(&server.uri());
+        let err = client.execute::<Value>(copy_request()).await.unwrap_err();
+        let Error::OperationTimeout { ref token, .. } = err else {
+            panic!("expected an operation timeout, got {err:?}");
+        };
+        assert_eq!(token, "tpuf-job-1");
+        // Sending the request again would start another operation.
+        assert!(!err.is_retryable());
+        let polls = server.received_requests().await.unwrap();
+        assert_eq!(polls.iter().filter(|r| r.method == "GET").count(), 3);
+    }
+
+    #[tokio::test]
+    async fn times_out_when_a_poll_times_out_with_the_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(accepted(OPERATION))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "status": "running" }))
+                    .set_delay(POLL_TIMEOUT * 10),
+            )
+            .mount(&server)
+            .await;
+
+        // Like the default 60s timeout, the request's timeout runs out in the same tick as its first poll's, and
+        // the poll's is the one seen first.
+        let client = Client::for_tests(&server.uri());
+        let request = copy_request().options(RequestOptions {
+            timeout: Some(POLL_TIMEOUT),
+            max_retries: Some(0),
+            ..Default::default()
+        });
+        let err = client.execute::<Value>(request).await.unwrap_err();
+        assert!(matches!(err, Error::OperationTimeout { .. }), "{err:?}");
     }
 
     #[test]
