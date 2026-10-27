@@ -2817,6 +2817,10 @@ pub struct QueryConfigConsistency {
     /// The query's consistency level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<QueryConfigConsistencyLevel>,
+    /// How long an eventually consistent query may reuse the node's cached view of the namespace
+    /// before refreshing it from object storage. Only valid with `level: eventual`. Defaults to 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_staleness_seconds: Option<u64>,
 }
 
 impl QueryConfigConsistency {
@@ -2830,11 +2834,12 @@ impl QueryConfigConsistency {
         self.level = Some(level.into());
         self
     }
-}
 
-impl From<QueryConfigConsistencyLevel> for QueryConfigConsistency {
-    fn from(value: QueryConfigConsistencyLevel) -> Self {
-        Self::new().level(value)
+    /// How long an eventually consistent query may reuse the node's cached view of the namespace before
+    /// refreshing it from object storage. Only valid with `level: eventual`. Defaults to 60.
+    pub fn max_staleness_seconds(mut self, max_staleness_seconds: u64) -> Self {
+        self.max_staleness_seconds = Some(max_staleness_seconds);
+        self
     }
 }
 
