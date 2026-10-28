@@ -1848,7 +1848,7 @@ impl WriteRequest {
         }
     }
 
-    /// The namespace to create an instant, copy-on-write clone of.
+    /// Configuration for branching from another namespace.
     pub fn branch_from_namespace(
         mut self,
         branch_from_namespace: impl Into<BranchFromNamespaceParams>,
@@ -1857,7 +1857,7 @@ impl WriteRequest {
         self
     }
 
-    /// The namespace to copy documents from.
+    /// Configuration for copying documents from another namespace.
     pub fn copy_from_namespace(
         mut self,
         copy_from_namespace: impl Into<CopyFromNamespaceParams>,
