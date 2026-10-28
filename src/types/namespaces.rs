@@ -176,6 +176,11 @@ pub struct EncryptionCustomerManaged {
     /// The identifier of the CMEK key to use for encryption. For GCP, the fully-qualified resource
     /// name of the key. For AWS, the ARN of the key.
     pub key_name: String,
+    /// The AWS KMS encryption context to send with every request that uses the key. Only supported
+    /// on AWS, and must be enabled for your organization. Keys may not start with `tpuf:` or
+    /// `aws:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_context: Option<BTreeMap<String, String>>,
 }
 
 impl EncryptionCustomerManaged {
@@ -183,7 +188,26 @@ impl EncryptionCustomerManaged {
     pub fn new(key_name: impl Into<String>) -> Self {
         Self {
             key_name: key_name.into(),
+            encryption_context: Default::default(),
         }
+    }
+
+    /// The AWS KMS encryption context to send with every request that uses the key. Only supported on
+    /// AWS, and must be enabled for your organization. Keys may not start with `tpuf:` or `aws:`.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
+    pub fn encryption_context(
+        mut self,
+        encryption_context: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        self.encryption_context
+            .get_or_insert_with(Default::default)
+            .extend(
+                encryption_context
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into())),
+            );
+        self
     }
 }
 
