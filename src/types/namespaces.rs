@@ -176,6 +176,11 @@ pub struct EncryptionCustomerManaged {
     /// The identifier of the CMEK key to use for encryption. For GCP, the fully-qualified resource
     /// name of the key. For AWS, the ARN of the key.
     pub key_name: String,
+    /// The AWS KMS encryption context to send with every request that uses the key. Only supported
+    /// on AWS, and must be enabled for your organization. Keys may not start with `tpuf:` or
+    /// `aws:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_context: Option<BTreeMap<String, String>>,
 }
 
 impl EncryptionCustomerManaged {
@@ -183,7 +188,26 @@ impl EncryptionCustomerManaged {
     pub fn new(key_name: impl Into<String>) -> Self {
         Self {
             key_name: key_name.into(),
+            encryption_context: Default::default(),
         }
+    }
+
+    /// The AWS KMS encryption context to send with every request that uses the key. Only supported on
+    /// AWS, and must be enabled for your organization. Keys may not start with `tpuf:` or `aws:`.
+    ///
+    /// Adds to any entries already set, rather than replacing them.
+    pub fn encryption_context(
+        mut self,
+        encryption_context: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        self.encryption_context
+            .get_or_insert_with(Default::default)
+            .extend(
+                encryption_context
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into())),
+            );
+        self
     }
 }
 
@@ -2811,87 +2835,48 @@ impl From<RankByAnnValue> for RankByKnnValue {
 }
 
 /// The consistency level for a query.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "level")]
 #[non_exhaustive]
-pub struct QueryConfigConsistency {
-    /// The query's consistency level.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub level: Option<QueryConfigConsistencyLevel>,
-    /// How long an eventually consistent query may reuse the node's cached view of the namespace
-    /// before refreshing it from object storage. Only valid with `level: eventual`. Defaults to 60.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_staleness_seconds: Option<u64>,
-}
-
-impl QueryConfigConsistency {
-    /// Creates a new [`QueryConfigConsistency`].
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The query's consistency level.
-    pub fn level(mut self, level: impl Into<QueryConfigConsistencyLevel>) -> Self {
-        self.level = Some(level.into());
-        self
-    }
-
-    /// How long an eventually consistent query may reuse the node's cached view of the namespace before
-    /// refreshing it from object storage. Only valid with `level: eventual`. Defaults to 60.
-    pub fn max_staleness_seconds(mut self, max_staleness_seconds: u64) -> Self {
-        self.max_staleness_seconds = Some(max_staleness_seconds);
-        self
-    }
-}
-
-/// The query's consistency level.
-///
-/// Converts from strings with [`From`], mapping values this version of the SDK doesn't know about to
-/// [`QueryConfigConsistencyLevel::Other`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum QueryConfigConsistencyLevel {
+#[allow(clippy::large_enum_variant)]
+pub enum QueryConfigConsistency {
     /// Strong consistency. Requires a round-trip to object storage to fetch the latest writes.
     #[serde(rename = "strong")]
     Strong,
     /// Eventual consistency. Does not require a round-trip to object storage, but may not see the
     /// latest writes.
     #[serde(rename = "eventual")]
-    Eventual,
-    /// A value not known to this version of the SDK.
-    #[serde(untagged)]
-    Other(String),
+    Eventual(QueryConfigConsistencyEventual),
 }
 
-impl QueryConfigConsistencyLevel {
-    /// The value's representation in the API.
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Strong => "strong",
-            Self::Eventual => "eventual",
-            Self::Other(value) => value,
-        }
+impl From<QueryConfigConsistencyEventual> for QueryConfigConsistency {
+    fn from(value: QueryConfigConsistencyEventual) -> Self {
+        Self::Eventual(value)
     }
 }
 
-impl std::fmt::Display for QueryConfigConsistencyLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
+/// Eventual consistency. Does not require a round-trip to object storage, but may not see the
+/// latest writes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
+pub struct QueryConfigConsistencyEventual {
+    /// How long the query may reuse the node's cached view of the namespace before refreshing it
+    /// from object storage. Defaults to 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_staleness_seconds: Option<u64>,
 }
 
-impl From<&str> for QueryConfigConsistencyLevel {
-    fn from(value: &str) -> Self {
-        match value {
-            "strong" => Self::Strong,
-            "eventual" => Self::Eventual,
-            other => Self::Other(other.to_owned()),
-        }
+impl QueryConfigConsistencyEventual {
+    /// Creates a new [`QueryConfigConsistencyEventual`].
+    pub fn new() -> Self {
+        Self::default()
     }
-}
 
-impl From<String> for QueryConfigConsistencyLevel {
-    fn from(value: String) -> Self {
-        Self::from(value.as_str())
+    /// How long the query may reuse the node's cached view of the namespace before refreshing it from
+    /// object storage. Defaults to 60.
+    pub fn max_staleness_seconds(mut self, max_staleness_seconds: u64) -> Self {
+        self.max_staleness_seconds = Some(max_staleness_seconds);
+        self
     }
 }
 
