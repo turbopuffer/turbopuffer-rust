@@ -141,7 +141,7 @@ async fn namespaces_explain_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/explain_query"))
-        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","value",{}]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["attr","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["attr","ANN",[0.5]],"top_k":3,"vector_encoding":"float"})))
+        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","value",{}]},"consistency":{"level":"strong"},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["attr","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["attr","ANN",[0.5]],"top_k":3,"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"plan_text":"plan_text"})))
         .mount(&server)
         .await;
@@ -151,7 +151,7 @@ async fn namespaces_explain_query() {
         .explain_query()
         .aggregate_by([("key", AggregateBy::count())])
         .compute_attributes([("key", Expr::embed_with_params("value", EmbedParams::new()))])
-        .consistency(QueryConfigConsistency::new())
+        .consistency(QueryConfigConsistency::Strong)
         .distance_metric(DistanceMetric::CosineDistance)
         .exclude_attributes(["string"])
         .filters(Filter::eq("attr", "value"))
@@ -221,7 +221,7 @@ async fn namespaces_multi_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/query"))
-        .and(body_json(json!({"queries":[{}],"consistency":{},"limit":3,"offset":3,"rerank_by":["RRF",{}],"vector_encoding":"float"})))
+        .and(body_json(json!({"queries":[{}],"consistency":{"level":"strong"},"limit":3,"offset":3,"rerank_by":["RRF",{}],"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4},"performance":{"approx_namespace_size":3,"cache_hit_ratio":0.25,"cache_temperature":"cache_temperature","exhaustive_search_count":6,"query_execution_ms":7,"server_total_ms":8,"embedding_ms":9,"embedding_tokens":10},"results":[{}]})))
         .mount(&server)
         .await;
@@ -229,7 +229,7 @@ async fn namespaces_multi_query() {
     let result = client(&server)
         .namespace("namespace")
         .multi_query([Query::new()])
-        .consistency(QueryConfigConsistency::new())
+        .consistency(QueryConfigConsistency::Strong)
         .limit(3)
         .offset(3)
         .rerank_by(RerankBy::rrf_with_params(RrfParams::new()))
@@ -271,7 +271,7 @@ async fn namespaces_query() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace/query"))
-        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","value",{}]},"consistency":{},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["attr","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["attr","ANN",[0.5]],"rerank_by":{"attribute":"attribute","model":"model","query":"query"},"top_k":3,"vector_encoding":"float"})))
+        .and(body_json(json!({"aggregate_by":{"key":["Count"]},"compute_attributes":{"key":["Embed","value",{}]},"consistency":{"level":"strong"},"distance_metric":"cosine_distance","exclude_attributes":["string"],"filters":["attr","Eq","value"],"group_by":["string"],"include_attributes":true,"limit":3,"offset":3,"rank_by":["attr","ANN",[0.5]],"rerank_by":{"attribute":"attribute","model":"model","query":"query"},"top_k":3,"vector_encoding":"float"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4},"performance":{"approx_namespace_size":3,"cache_hit_ratio":0.25,"cache_temperature":"cache_temperature","exhaustive_search_count":6,"query_execution_ms":7,"server_total_ms":8,"embedding_ms":9,"embedding_tokens":10},"aggregation_groups":[{"key":"value"}],"aggregations":{"key":"value"},"rows":[{"id":3}]})))
         .mount(&server)
         .await;
@@ -281,7 +281,7 @@ async fn namespaces_query() {
         .query()
         .aggregate_by([("key", AggregateBy::count())])
         .compute_attributes([("key", Expr::embed_with_params("value", EmbedParams::new()))])
-        .consistency(QueryConfigConsistency::new())
+        .consistency(QueryConfigConsistency::Strong)
         .distance_metric(DistanceMetric::CosineDistance)
         .exclude_attributes(["string"])
         .filters(Filter::eq("attr", "value"))
