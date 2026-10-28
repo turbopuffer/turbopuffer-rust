@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0-beta.3](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-beta.2...v0.1.0-beta.3) (2026-10-28)
+
+
+### Features
+
+* openapi: add encryption_context to customer-managed encryption ([4cd974b](https://github.com/turbopuffer/turbopuffer-rust/commit/4cd974b38a5f8af2ca61c3b378edbaceb534af19))
+* spec: split query consistency into strong and eventual variants ([1234b31](https://github.com/turbopuffer/turbopuffer-rust/commit/1234b317b3deaa04748a17f5c834735cc49cbda5))
+* tpuf-engine: add max_staleness_seconds to eventual consistency ([0b99096](https://github.com/turbopuffer/turbopuffer-rust/commit/0b990968cdd252ea119c55e513219c87f4d39ab1))
+
 ## [0.1.0-beta.2](https://github.com/turbopuffer/turbopuffer-rust/compare/v0.1.0-beta.1...v0.1.0-beta.2) (2026-10-27)
 
 
