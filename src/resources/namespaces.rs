@@ -1792,6 +1792,8 @@ pub struct WriteRequest {
 #[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct WriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) arrange_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) branch_from_namespace: Option<BranchFromNamespaceParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) copy_from_namespace: Option<CopyFromNamespaceParams>,
@@ -1846,6 +1848,15 @@ impl WriteRequest {
                 ..Default::default()
             },
         }
+    }
+
+    /// Experimental. Stores documents in ranges of this attribute, ordered by it, so queries filtering
+    /// on a narrow range of it or ordered by it skip the rest. Documents should be written in roughly
+    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`, and can only be set
+    /// on a namespace's inaugural write.
+    pub fn arrange_by(mut self, arrange_by: impl Into<String>) -> Self {
+        self.body.arrange_by = Some(arrange_by.into());
+        self
     }
 
     /// The namespace to create an instant, copy-on-write clone of.

@@ -3285,6 +3285,9 @@ pub struct NamespaceMetadata {
     pub schema: BTreeMap<String, AttributeSchemaConfig>,
     /// The timestamp when the namespace was last modified by a write operation.
     pub updated_at: jiff::Timestamp,
+    /// The attribute the namespace is arranged by. Omitted when not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrange_by: Option<String>,
     /// Configuration for namespace pinning, along with the current status of the pinned namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinning: Option<PinningConfigResponse>,
