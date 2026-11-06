@@ -16,7 +16,7 @@ use crate::transport::{ApiRequest, RequestOptions, encode_path_segment};
 use crate::types::{
     AggregateBy, AttributeSchema, BranchFromNamespaceParams, Columns, CopyFromNamespaceOperation,
     CopyFromNamespaceParams, DeleteAllResponse, DistanceMetric, Encryption, ExplainQueryResponse,
-    Expr, Filter, GroupBy, HintCacheWarmResponse, Id, IncludeAttributes, MultiQueryLimit,
+    Expr, Filter, GroupBy, HintCacheWarmResponse, Id, IncludeAttributes, Layout2, MultiQueryLimit,
     MultiQueryResult, NamespaceMetadata, NamespaceMetadataPatchPinning, PatchByFilter, Query,
     QueryConfigConsistency, QueryLimit, QueryResult, RankBy, RecallResponse, RerankBy,
     RerankModelParams, Row, SchemaResponse, ShardingConfig, StartCopyFromResponse,
@@ -1812,6 +1812,8 @@ pub(crate) struct WriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) encryption: Option<Encryption>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) layout: Option<Layout2>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) patch_by_filter: Option<PatchByFilter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) patch_by_filter_allow_partial: Option<bool>,
@@ -1920,6 +1922,13 @@ impl WriteRequest {
     /// The encryption configuration for a namespace.
     pub fn encryption(mut self, encryption: impl Into<Encryption>) -> Self {
         self.body.encryption = Some(encryption.into());
+        self
+    }
+
+    /// Experimental. How a namespace stores its documents. Can only be set on a namespace's inaugural
+    /// write, and cannot be changed later.
+    pub fn layout(mut self, layout: impl Into<Layout2>) -> Self {
+        self.body.layout = Some(layout.into());
         self
     }
 
