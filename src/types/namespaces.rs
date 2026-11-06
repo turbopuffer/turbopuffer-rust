@@ -3286,9 +3286,10 @@ pub struct NamespaceMetadata {
     pub schema: BTreeMap<String, AttributeSchemaConfig>,
     /// The timestamp when the namespace was last modified by a write operation.
     pub updated_at: jiff::Timestamp,
-    /// The attribute the namespace is arranged by. Omitted when not set.
+    /// Experimental. How a namespace stores its documents. Can only be set on a namespace's
+    /// inaugural write, and cannot be changed later.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arrange_by: Option<String>,
+    pub layout: Option<Layout>,
     /// Configuration for namespace pinning, along with the current status of the pinned namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinning: Option<PinningConfigResponse>,
@@ -4006,6 +4007,18 @@ impl From<String> for SparseDistanceMetric {
     fn from(value: String) -> Self {
         Self::from(value.as_str())
     }
+}
+
+/// Experimental. How a namespace stores its documents. Can only be set on a namespace's inaugural
+/// write, and cannot be changed later.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
+pub struct Layout {
+    /// Stores documents in ranges of this attribute, ordered by it, so queries filtering on a
+    /// narrow range of it or ordered by it skip the rest. Documents should be written in roughly
+    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrange_by: Option<String>,
 }
 
 /// Configuration for namespace pinning, along with the current status of the pinned namespace.
@@ -5015,6 +5028,33 @@ impl From<String> for CopyFromNamespaceConfig {
 impl From<&str> for CopyFromNamespaceConfig {
     fn from(value: &str) -> Self {
         Self::new(value)
+    }
+}
+
+/// Experimental. How a namespace stores its documents. Can only be set on a namespace's inaugural
+/// write, and cannot be changed later.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
+pub struct Layout2 {
+    /// Stores documents in ranges of this attribute, ordered by it, so queries filtering on a
+    /// narrow range of it or ordered by it skip the rest. Documents should be written in roughly
+    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrange_by: Option<String>,
+}
+
+impl Layout2 {
+    /// Creates a new [`Layout2`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Stores documents in ranges of this attribute, ordered by it, so queries filtering on a narrow
+    /// range of it or ordered by it skip the rest. Documents should be written in roughly ascending
+    /// order of it. Must have type `int`, `uint`, `datetime` or `string`.
+    pub fn arrange_by(mut self, arrange_by: impl Into<String>) -> Self {
+        self.arrange_by = Some(arrange_by.into());
+        self
     }
 }
 

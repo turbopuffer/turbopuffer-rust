@@ -5,8 +5,8 @@ use serde_json::json;
 use turbopuffer::Client;
 use turbopuffer::types::{
     AggregateBy, Columns, DistanceMetric, EmbedParams, EncryptionCustomerManaged, Expr, Filter,
-    GroupBy, PatchByFilter, Query, QueryConfigConsistency, RankBy, RerankBy, RerankModelParams,
-    Row, RrfParams, ShardingConfig, VectorEncoding,
+    GroupBy, Layout2, PatchByFilter, Query, QueryConfigConsistency, RankBy, RerankBy,
+    RerankModelParams, Row, RrfParams, ShardingConfig, VectorEncoding,
 };
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -200,7 +200,7 @@ async fn namespaces_metadata() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v2/namespaces/namespace/metadata"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","arrange_by":"arrange_by","pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","layout":{"arrange_by":"arrange_by"},"pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
         .mount(&server)
         .await;
 
@@ -377,7 +377,7 @@ async fn namespaces_update_metadata() {
     Mock::given(method("PATCH"))
         .and(path("/v1/namespaces/namespace/metadata"))
         .and(body_json(json!({"pinning":true,"read_only":true})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","arrange_by":"arrange_by","pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","layout":{"arrange_by":"arrange_by"},"pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
         .mount(&server)
         .await;
 
@@ -422,7 +422,7 @@ async fn namespaces_write() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v2/namespaces/namespace"))
-        .and(body_json(json!({"arrange_by":"string","branch_from_namespace":"string","copy_from_namespace":"string","create_namespace":true,"delete_by_filter":["attr","Eq","value"],"delete_by_filter_allow_partial":true,"delete_condition":["attr","Eq","value"],"deletes":[3],"disable_backpressure":true,"distance_metric":"cosine_distance","encryption":{"mode":"customer-managed","key_name":"key_name"},"patch_by_filter":{"filters":["attr","Eq","value"],"patch":{"key":"value"}},"patch_by_filter_allow_partial":true,"patch_columns":{"id":[3]},"patch_condition":["attr","Eq","value"],"patch_rows":[{"id":3}],"return_affected_ids":true,"schema":{"key":"string"},"sharding":{"num_shards":3},"upsert_columns":{"id":[3]},"upsert_condition":["attr","Eq","value"],"upsert_rows":[{"id":3}]})))
+        .and(body_json(json!({"branch_from_namespace":"string","copy_from_namespace":"string","create_namespace":true,"delete_by_filter":["attr","Eq","value"],"delete_by_filter_allow_partial":true,"delete_condition":["attr","Eq","value"],"deletes":[3],"disable_backpressure":true,"distance_metric":"cosine_distance","encryption":{"mode":"customer-managed","key_name":"key_name"},"layout":{},"patch_by_filter":{"filters":["attr","Eq","value"],"patch":{"key":"value"}},"patch_by_filter_allow_partial":true,"patch_columns":{"id":[3]},"patch_condition":["attr","Eq","value"],"patch_rows":[{"id":3}],"return_affected_ids":true,"schema":{"key":"string"},"sharding":{"num_shards":3},"upsert_columns":{"id":[3]},"upsert_condition":["attr","Eq","value"],"upsert_rows":[{"id":3}]})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"billing":{"billable_logical_bytes_written":3,"query":{"billable_logical_bytes_queried":3,"billable_logical_bytes_returned":4}},"message":"message","rows_affected":5,"status":"OK","deleted_ids":[3],"patched_ids":[3],"performance":{"server_total_ms":3,"embedding_ms":4,"embedding_tokens":5},"rows_deleted":10,"rows_patched":11,"rows_remaining":true,"rows_upserted":13,"upserted_ids":[3]})))
         .mount(&server)
         .await;
@@ -430,7 +430,6 @@ async fn namespaces_write() {
     let result = client(&server)
         .namespace("namespace")
         .write()
-        .arrange_by("string")
         .branch_from_namespace("string")
         .copy_from_namespace("string")
         .create_namespace(true)
@@ -441,6 +440,7 @@ async fn namespaces_write() {
         .disable_backpressure(true)
         .distance_metric(DistanceMetric::CosineDistance)
         .encryption(EncryptionCustomerManaged::new("key_name"))
+        .layout(Layout2::new())
         .patch_by_filter(PatchByFilter::new(
             [("key", "value")],
             Filter::eq("attr", "value"),

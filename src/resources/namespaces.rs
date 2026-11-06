@@ -16,7 +16,7 @@ use crate::transport::{ApiRequest, RequestOptions, encode_path_segment};
 use crate::types::{
     AggregateBy, AttributeSchema, BranchFromNamespaceParams, Columns, CopyFromNamespaceOperation,
     CopyFromNamespaceParams, DeleteAllResponse, DistanceMetric, Encryption, ExplainQueryResponse,
-    Expr, Filter, GroupBy, HintCacheWarmResponse, Id, IncludeAttributes, MultiQueryLimit,
+    Expr, Filter, GroupBy, HintCacheWarmResponse, Id, IncludeAttributes, Layout2, MultiQueryLimit,
     MultiQueryResult, NamespaceMetadata, NamespaceMetadataPatchPinning, PatchByFilter, Query,
     QueryConfigConsistency, QueryLimit, QueryResult, RankBy, RecallResponse, RerankBy,
     RerankModelParams, Row, SchemaResponse, ShardingConfig, StartCopyFromResponse,
@@ -1792,8 +1792,6 @@ pub struct WriteRequest {
 #[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct WriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) arrange_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) branch_from_namespace: Option<BranchFromNamespaceParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) copy_from_namespace: Option<CopyFromNamespaceParams>,
@@ -1813,6 +1811,8 @@ pub(crate) struct WriteBody {
     pub(crate) distance_metric: Option<DistanceMetric>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) encryption: Option<Encryption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) layout: Option<Layout2>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) patch_by_filter: Option<PatchByFilter>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1848,15 +1848,6 @@ impl WriteRequest {
                 ..Default::default()
             },
         }
-    }
-
-    /// Experimental. Stores documents in ranges of this attribute, ordered by it, so queries filtering
-    /// on a narrow range of it or ordered by it skip the rest. Documents should be written in roughly
-    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`, and can only be set
-    /// on a namespace's inaugural write.
-    pub fn arrange_by(mut self, arrange_by: impl Into<String>) -> Self {
-        self.body.arrange_by = Some(arrange_by.into());
-        self
     }
 
     /// The namespace to create an instant, copy-on-write clone of.
@@ -1931,6 +1922,13 @@ impl WriteRequest {
     /// The encryption configuration for a namespace.
     pub fn encryption(mut self, encryption: impl Into<Encryption>) -> Self {
         self.body.encryption = Some(encryption.into());
+        self
+    }
+
+    /// Experimental. How a namespace stores its documents. Can only be set on a namespace's inaugural
+    /// write, and cannot be changed later.
+    pub fn layout(mut self, layout: impl Into<Layout2>) -> Self {
+        self.body.layout = Some(layout.into());
         self
     }
 
