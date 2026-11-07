@@ -1925,8 +1925,8 @@ impl WriteRequest {
         self
     }
 
-    /// Experimental. How a namespace stores its documents. Can only be set on a namespace's inaugural
-    /// write, and cannot be changed later.
+    /// Experimental. How a namespace stores its documents. A change applies to documents indexed after
+    /// it.
     pub fn layout(mut self, layout: impl Into<Layout2>) -> Self {
         self.body.layout = Some(layout.into());
         self
