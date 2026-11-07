@@ -2230,6 +2230,8 @@ pub enum FilterContainsAllTokensValue {
     String(String),
     /// The tokens to search for.
     Array(Vec<String>),
+    /// A value not known to this version of the SDK.
+    Other(Value),
 }
 
 impl From<String> for FilterContainsAllTokensValue {
@@ -2268,33 +2270,6 @@ impl<const N: usize> From<[&str; N]> for FilterContainsAllTokensValue {
     }
 }
 
-impl From<FilterContainsAnyTokenValue> for FilterContainsAllTokensValue {
-    fn from(value: FilterContainsAnyTokenValue) -> Self {
-        match value {
-            FilterContainsAnyTokenValue::String(value) => Self::String(value),
-            FilterContainsAnyTokenValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<FilterContainsTokenSequenceValue> for FilterContainsAllTokensValue {
-    fn from(value: FilterContainsTokenSequenceValue) -> Self {
-        match value {
-            FilterContainsTokenSequenceValue::String(value) => Self::String(value),
-            FilterContainsTokenSequenceValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<RankByTextBm25Value> for FilterContainsAllTokensValue {
-    fn from(value: RankByTextBm25Value) -> Self {
-        match value {
-            RankByTextBm25Value::String(value) => Self::String(value),
-            RankByTextBm25Value::Array(value) => Self::Array(value),
-        }
-    }
-}
-
 /// One of the shapes `ContainsAnyToken` accepts for its `value`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -2305,6 +2280,8 @@ pub enum FilterContainsAnyTokenValue {
     String(String),
     /// The tokens to search for.
     Array(Vec<String>),
+    /// A value not known to this version of the SDK.
+    Other(Value),
 }
 
 impl From<String> for FilterContainsAnyTokenValue {
@@ -2343,33 +2320,6 @@ impl<const N: usize> From<[&str; N]> for FilterContainsAnyTokenValue {
     }
 }
 
-impl From<FilterContainsAllTokensValue> for FilterContainsAnyTokenValue {
-    fn from(value: FilterContainsAllTokensValue) -> Self {
-        match value {
-            FilterContainsAllTokensValue::String(value) => Self::String(value),
-            FilterContainsAllTokensValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<FilterContainsTokenSequenceValue> for FilterContainsAnyTokenValue {
-    fn from(value: FilterContainsTokenSequenceValue) -> Self {
-        match value {
-            FilterContainsTokenSequenceValue::String(value) => Self::String(value),
-            FilterContainsTokenSequenceValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<RankByTextBm25Value> for FilterContainsAnyTokenValue {
-    fn from(value: RankByTextBm25Value) -> Self {
-        match value {
-            RankByTextBm25Value::String(value) => Self::String(value),
-            RankByTextBm25Value::Array(value) => Self::Array(value),
-        }
-    }
-}
-
 /// One of the shapes `ContainsTokenSequence` accepts for its `value`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -2380,6 +2330,8 @@ pub enum FilterContainsTokenSequenceValue {
     String(String),
     /// The tokens to search for.
     Array(Vec<String>),
+    /// A value not known to this version of the SDK.
+    Other(Value),
 }
 
 impl From<String> for FilterContainsTokenSequenceValue {
@@ -2415,33 +2367,6 @@ impl From<&[&str]> for FilterContainsTokenSequenceValue {
 impl<const N: usize> From<[&str; N]> for FilterContainsTokenSequenceValue {
     fn from(value: [&str; N]) -> Self {
         Self::Array(value.into_iter().map(str::to_owned).collect())
-    }
-}
-
-impl From<FilterContainsAllTokensValue> for FilterContainsTokenSequenceValue {
-    fn from(value: FilterContainsAllTokensValue) -> Self {
-        match value {
-            FilterContainsAllTokensValue::String(value) => Self::String(value),
-            FilterContainsAllTokensValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<FilterContainsAnyTokenValue> for FilterContainsTokenSequenceValue {
-    fn from(value: FilterContainsAnyTokenValue) -> Self {
-        match value {
-            FilterContainsAnyTokenValue::String(value) => Self::String(value),
-            FilterContainsAnyTokenValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<RankByTextBm25Value> for FilterContainsTokenSequenceValue {
-    fn from(value: RankByTextBm25Value) -> Self {
-        match value {
-            RankByTextBm25Value::String(value) => Self::String(value),
-            RankByTextBm25Value::Array(value) => Self::Array(value),
-        }
     }
 }
 
@@ -2517,6 +2442,8 @@ pub enum RankByTextBm25Value {
     String(String),
     /// The tokens to search for.
     Array(Vec<String>),
+    /// A value not known to this version of the SDK.
+    Other(Value),
 }
 
 impl From<String> for RankByTextBm25Value {
@@ -2552,33 +2479,6 @@ impl From<&[&str]> for RankByTextBm25Value {
 impl<const N: usize> From<[&str; N]> for RankByTextBm25Value {
     fn from(value: [&str; N]) -> Self {
         Self::Array(value.into_iter().map(str::to_owned).collect())
-    }
-}
-
-impl From<FilterContainsAllTokensValue> for RankByTextBm25Value {
-    fn from(value: FilterContainsAllTokensValue) -> Self {
-        match value {
-            FilterContainsAllTokensValue::String(value) => Self::String(value),
-            FilterContainsAllTokensValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<FilterContainsAnyTokenValue> for RankByTextBm25Value {
-    fn from(value: FilterContainsAnyTokenValue) -> Self {
-        match value {
-            FilterContainsAnyTokenValue::String(value) => Self::String(value),
-            FilterContainsAnyTokenValue::Array(value) => Self::Array(value),
-        }
-    }
-}
-
-impl From<FilterContainsTokenSequenceValue> for RankByTextBm25Value {
-    fn from(value: FilterContainsTokenSequenceValue) -> Self {
-        match value {
-            FilterContainsTokenSequenceValue::String(value) => Self::String(value),
-            FilterContainsTokenSequenceValue::Array(value) => Self::Array(value),
-        }
     }
 }
 
@@ -2702,6 +2602,8 @@ pub enum RankByAnnValue {
     Multi(Vec<Vec<f32>>),
     /// An expression that computes a value.
     Expr(Box<Expr>),
+    /// A value not known to this version of the SDK.
+    Other(Value),
 }
 
 impl From<Vec<f32>> for RankByAnnValue {
@@ -2752,16 +2654,6 @@ impl From<Expr> for RankByAnnValue {
     }
 }
 
-impl From<RankByKnnValue> for RankByAnnValue {
-    fn from(value: RankByKnnValue) -> Self {
-        match value {
-            RankByKnnValue::Vector(value) => Self::Vector(value),
-            RankByKnnValue::Multi(value) => Self::Multi(value),
-            RankByKnnValue::Expr(value) => Self::Expr(value),
-        }
-    }
-}
-
 /// One of the shapes `kNN` accepts for its `value`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -2774,6 +2666,8 @@ pub enum RankByKnnValue {
     Multi(Vec<Vec<f32>>),
     /// An expression that computes a value.
     Expr(Box<Expr>),
+    /// A value not known to this version of the SDK.
+    Other(Value),
 }
 
 impl From<Vec<f32>> for RankByKnnValue {
@@ -2821,16 +2715,6 @@ impl<const M: usize, const N: usize> From<[[f32; M]; N]> for RankByKnnValue {
 impl From<Expr> for RankByKnnValue {
     fn from(value: Expr) -> Self {
         Self::Expr(Box::new(value))
-    }
-}
-
-impl From<RankByAnnValue> for RankByKnnValue {
-    fn from(value: RankByAnnValue) -> Self {
-        match value {
-            RankByAnnValue::Vector(value) => Self::Vector(value),
-            RankByAnnValue::Multi(value) => Self::Multi(value),
-            RankByAnnValue::Expr(value) => Self::Expr(value),
-        }
     }
 }
 
@@ -4014,12 +3898,12 @@ impl From<String> for SparseDistanceMetric {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct Layout {
-    /// Stores documents in ranges of this attribute, ordered by it, so queries filtering on a
-    /// narrow range of it or ordered by it skip the rest. Documents should be written in roughly
-    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`. `id` resets the
-    /// namespace to the default layout.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arrange_by: Option<String>,
+    /// Stores documents in ranges of an attribute, in ascending order, so queries filtering on a
+    /// narrow range of it or ranking by it skip the rest. Documents should be written in roughly
+    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`. `["id", "asc"]`
+    /// resets the namespace to the default layout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rank_by: Vec<RankBy>,
 }
 
 /// Configuration for namespace pinning, along with the current status of the pinned namespace.
@@ -5037,12 +4921,12 @@ impl From<&str> for CopyFromNamespaceConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct Layout2 {
-    /// Stores documents in ranges of this attribute, ordered by it, so queries filtering on a
-    /// narrow range of it or ordered by it skip the rest. Documents should be written in roughly
-    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`. `id` resets the
-    /// namespace to the default layout.
+    /// Stores documents in ranges of an attribute, in ascending order, so queries filtering on a
+    /// narrow range of it or ranking by it skip the rest. Documents should be written in roughly
+    /// ascending order of it. Must have type `int`, `uint`, `datetime` or `string`. `["id", "asc"]`
+    /// resets the namespace to the default layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arrange_by: Option<String>,
+    pub rank_by: Option<Vec<RankBy>>,
 }
 
 impl Layout2 {
@@ -5051,12 +4935,16 @@ impl Layout2 {
         Self::default()
     }
 
-    /// Stores documents in ranges of this attribute, ordered by it, so queries filtering on a narrow
-    /// range of it or ordered by it skip the rest. Documents should be written in roughly ascending
-    /// order of it. Must have type `int`, `uint`, `datetime` or `string`. `id` resets the namespace to
-    /// the default layout.
-    pub fn arrange_by(mut self, arrange_by: impl Into<String>) -> Self {
-        self.arrange_by = Some(arrange_by.into());
+    /// Stores documents in ranges of an attribute, in ascending order, so queries filtering on a narrow
+    /// range of it or ranking by it skip the rest. Documents should be written in roughly ascending
+    /// order of it. Must have type `int`, `uint`, `datetime` or `string`. `["id", "asc"]` resets the
+    /// namespace to the default layout.
+    ///
+    /// Adds to any items already set, rather than replacing them.
+    pub fn rank_by(mut self, rank_by: impl IntoIterator<Item = impl Into<RankBy>>) -> Self {
+        self.rank_by
+            .get_or_insert_with(Default::default)
+            .extend(rank_by.into_iter().map(Into::into));
         self
     }
 }

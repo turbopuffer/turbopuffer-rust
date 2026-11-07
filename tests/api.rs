@@ -200,7 +200,7 @@ async fn namespaces_metadata() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v2/namespaces/namespace/metadata"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","layout":{"arrange_by":"arrange_by"},"pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","layout":{"rank_by":[["attr","SparseKNN",{"key":0.5}]]},"pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
         .mount(&server)
         .await;
 
@@ -377,7 +377,7 @@ async fn namespaces_update_metadata() {
     Mock::given(method("PATCH"))
         .and(path("/v1/namespaces/namespace/metadata"))
         .and(body_json(json!({"pinning":true,"read_only":true})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","layout":{"arrange_by":"arrange_by"},"pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approx_logical_bytes":3,"approx_row_count":4,"created_at":"2024-01-01T00:00:00Z","encryption":{"mode":"customer-managed","key_name":"key_name"},"index":{"status":"up-to-date"},"schema":{"key":{"type":"type"}},"updated_at":"2024-01-01T00:00:00Z","layout":{"rank_by":[["attr","SparseKNN",{"key":0.5}]]},"pinning":{"replicas":3,"status":{"ready_replicas":3,"replicas":4,"updated_at":"2024-01-01T00:00:00Z","utilization":1.5}},"read_only":true,"sharding":{"num_shards":3}})))
         .mount(&server)
         .await;
 
