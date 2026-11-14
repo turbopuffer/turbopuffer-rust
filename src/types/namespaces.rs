@@ -256,6 +256,27 @@ pub enum AggregateBy {
         /// The name of the attribute to sum (must be of numeric type).
         attr: String,
     },
+    /// The mean of the non-null values of the given attribute, as a float. Integer values are
+    /// accumulated in float64 and round once the running sum passes 2^53. Omitted from the response
+    /// when every value is null.
+    Avg {
+        /// The name of the attribute to average (must be a scalar `int`, `uint`, or `float`).
+        attr: String,
+    },
+    /// The smallest non-null value of the given attribute. Omitted from the response when every
+    /// value is null.
+    Min {
+        /// The name of the attribute (must be a scalar type other than `bytes`: `string`, `int`,
+        /// `uint`, `float`, `bool`, `uuid`, or `datetime`).
+        attr: String,
+    },
+    /// The largest non-null value of the given attribute. Omitted from the response when every
+    /// value is null.
+    Max {
+        /// The name of the attribute (must be a scalar type other than `bytes`: `string`, `int`,
+        /// `uint`, `float`, `bool`, `uuid`, or `datetime`).
+        attr: String,
+    },
 }
 
 #[allow(deprecated)]
@@ -269,6 +290,25 @@ impl AggregateBy {
     pub fn sum(attr: impl Into<String>) -> Self {
         Self::Sum { attr: attr.into() }
     }
+
+    /// The mean of the non-null values of the given attribute, as a float. Integer values are
+    /// accumulated in float64 and round once the running sum passes 2^53. Omitted from the response
+    /// when every value is null.
+    pub fn avg(attr: impl Into<String>) -> Self {
+        Self::Avg { attr: attr.into() }
+    }
+
+    /// The smallest non-null value of the given attribute. Omitted from the response when every value
+    /// is null.
+    pub fn min(attr: impl Into<String>) -> Self {
+        Self::Min { attr: attr.into() }
+    }
+
+    /// The largest non-null value of the given attribute. Omitted from the response when every value is
+    /// null.
+    pub fn max(attr: impl Into<String>) -> Self {
+        Self::Max { attr: attr.into() }
+    }
 }
 
 #[allow(deprecated)]
@@ -277,6 +317,9 @@ impl Serialize for AggregateBy {
         match self {
             Self::Count => ("Count",).serialize(serializer),
             Self::Sum { attr } => ("Sum", attr).serialize(serializer),
+            Self::Avg { attr } => ("Avg", attr).serialize(serializer),
+            Self::Min { attr } => ("Min", attr).serialize(serializer),
+            Self::Max { attr } => ("Max", attr).serialize(serializer),
         }
     }
 }
@@ -291,6 +334,21 @@ impl<'de> Deserialize<'de> for AggregateBy {
         if let Some(elements) = tuple_elements(&value, 2, &[(0, "Sum")]) {
             if let Some(attr) = decode_element(&elements[1]) {
                 return Ok(Self::Sum { attr });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Avg")]) {
+            if let Some(attr) = decode_element(&elements[1]) {
+                return Ok(Self::Avg { attr });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Min")]) {
+            if let Some(attr) = decode_element(&elements[1]) {
+                return Ok(Self::Min { attr });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 2, &[(0, "Max")]) {
+            if let Some(attr) = decode_element(&elements[1]) {
+                return Ok(Self::Max { attr });
             }
         }
         Err(serde::de::Error::custom(format!(
@@ -5187,6 +5245,9 @@ mod tests {
         let cases: Vec<(AggregateBy, Value)> = vec![
             (AggregateBy::count(), json!(["Count"])),
             (AggregateBy::sum("attr"), json!(["Sum", "attr"])),
+            (AggregateBy::avg("attr"), json!(["Avg", "attr"])),
+            (AggregateBy::min("attr"), json!(["Min", "attr"])),
+            (AggregateBy::max("attr"), json!(["Max", "attr"])),
         ];
         for (value, expected) in cases {
             let json = serde_json::to_value(&value).unwrap();
