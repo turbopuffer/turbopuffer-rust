@@ -23,7 +23,7 @@ async fn per_request_authorization_survives_async_polling() {
         .and(header("authorization", "Bearer scoped-key"))
         .and(header("x-proxy-token", "request-token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"status":"finished","result":{"success":{"status":"OK","message":"copied"}}}),
+            json!({"status":"finished","result":{"success":{"status":"OK","message":"copied","rows_affected":0,"billing":{"billable_logical_bytes_written":0}}}}),
         ))
         .mount(&server)
         .await;
