@@ -277,6 +277,16 @@ pub enum AggregateBy {
         /// `uint`, `float`, `bool`, `uuid`, or `datetime`).
         attr: String,
     },
+    /// An estimate of the value at the given quantile of the non-null values of the given
+    /// attribute, as a float. Computed with an exponential histogram of at most 160 buckets and a
+    /// maximum scale of 20. The minimum and maximum quantiles are exact. Omitted from the response
+    /// when every value is null.
+    ApproxPercentile {
+        /// The name of the attribute (must be a scalar `int`, `uint`, or `float`).
+        attr: String,
+        /// The quantile to estimate, between 0 and 1 (e.g. 0.99 for p99).
+        quantile: f64,
+    },
 }
 
 #[allow(deprecated)]
@@ -309,6 +319,17 @@ impl AggregateBy {
     pub fn max(attr: impl Into<String>) -> Self {
         Self::Max { attr: attr.into() }
     }
+
+    /// An estimate of the value at the given quantile of the non-null values of the given attribute, as
+    /// a float. Computed with an exponential histogram of at most 160 buckets and a maximum scale of
+    /// 20. The minimum and maximum quantiles are exact. Omitted from the response when every value is
+    /// null.
+    pub fn approx_percentile(attr: impl Into<String>, quantile: f64) -> Self {
+        Self::ApproxPercentile {
+            attr: attr.into(),
+            quantile,
+        }
+    }
 }
 
 #[allow(deprecated)]
@@ -320,6 +341,9 @@ impl Serialize for AggregateBy {
             Self::Avg { attr } => ("Avg", attr).serialize(serializer),
             Self::Min { attr } => ("Min", attr).serialize(serializer),
             Self::Max { attr } => ("Max", attr).serialize(serializer),
+            Self::ApproxPercentile { attr, quantile } => {
+                ("ApproxPercentile", attr, quantile).serialize(serializer)
+            }
         }
     }
 }
@@ -349,6 +373,13 @@ impl<'de> Deserialize<'de> for AggregateBy {
         if let Some(elements) = tuple_elements(&value, 2, &[(0, "Max")]) {
             if let Some(attr) = decode_element(&elements[1]) {
                 return Ok(Self::Max { attr });
+            }
+        }
+        if let Some(elements) = tuple_elements(&value, 3, &[(0, "ApproxPercentile")]) {
+            if let (Some(attr), Some(quantile)) =
+                (decode_element(&elements[1]), decode_element(&elements[2]))
+            {
+                return Ok(Self::ApproxPercentile { attr, quantile });
             }
         }
         Err(serde::de::Error::custom(format!(
@@ -5248,6 +5279,10 @@ mod tests {
             (AggregateBy::avg("attr"), json!(["Avg", "attr"])),
             (AggregateBy::min("attr"), json!(["Min", "attr"])),
             (AggregateBy::max("attr"), json!(["Max", "attr"])),
+            (
+                AggregateBy::approx_percentile("attr", 0.75),
+                json!(["ApproxPercentile", "attr", 0.75]),
+            ),
         ];
         for (value, expected) in cases {
             let json = serde_json::to_value(&value).unwrap();
