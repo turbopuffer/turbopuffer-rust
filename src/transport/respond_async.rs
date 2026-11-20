@@ -18,7 +18,9 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use reqwest::header::{CONTENT_ENCODING, CONTENT_LENGTH, HeaderMap, LOCATION};
+use reqwest::header::{
+    CONTENT_ENCODING, CONTENT_LENGTH, HeaderMap, HeaderName, HeaderValue, LOCATION,
+};
 use reqwest::{Response, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::Value;
@@ -93,6 +95,17 @@ impl Client {
             .max_retries
             .unwrap_or(self.inner.max_retries);
         let mut headers = self.inner.headers.clone();
+        // Preserve the same request overrides as the initial request, including scoped API keys.
+        let mut overrides = HeaderMap::new();
+        for (name, value) in request.headers.iter().chain(&request.options.headers) {
+            if let (Ok(name), Ok(value)) = (
+                HeaderName::try_from(name.as_str()),
+                HeaderValue::try_from(value.as_str()),
+            ) {
+                overrides.append(name, value);
+            }
+        }
+        headers.extend(overrides);
         headers.remove(PREFER);
 
         let wait = self.poll_until_finished(&location, &headers, max_retries);
